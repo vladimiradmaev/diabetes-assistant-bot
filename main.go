@@ -37,10 +37,11 @@ func main() {
 	aiService := services.NewAIService(cfg.GeminiAPIKey, cfg.OpenAIAPIKey)
 	userService := services.NewUserService(db)
 	foodAnalysisService := services.NewFoodAnalysisService(aiService, db)
+	bloodSugarService := services.NewBloodSugarService(db)
 	log.Println("Services initialized successfully")
 
 	// Initialize bot
-	telegramBot, err := bot.NewBot(cfg.TelegramToken, userService, foodAnalysisService)
+	telegramBot, err := bot.NewBot(cfg.TelegramToken, userService, foodAnalysisService, bloodSugarService)
 	if err != nil {
 		log.Fatalf("Failed to create bot: %v", err)
 	}

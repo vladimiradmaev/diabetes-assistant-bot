@@ -26,6 +26,11 @@ func (s *FoodAnalysisService) AnalyzeFood(ctx context.Context, userID uint, imag
 		return nil, fmt.Errorf("failed to analyze food image: %w", err)
 	}
 
+	// Use the weight from the AI result if no weight was provided
+	if weight <= 0 && result.Weight > 0 {
+		weight = result.Weight
+	}
+
 	analysis := &database.FoodAnalysis{
 		UserID:       userID,
 		ImageURL:     imageURL,

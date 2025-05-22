@@ -3,6 +3,7 @@ package database
 import (
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/vladimiradmaev/diabetes-helper/internal/config"
 	"gorm.io/driver/postgres"
@@ -29,6 +30,14 @@ type FoodAnalysis struct {
 	UsedProvider string // "gemini" or "openai"
 }
 
+type BloodSugarRecord struct {
+	gorm.Model
+	UserID    uint
+	User      User
+	Value     float64
+	Timestamp time.Time
+}
+
 func NewPostgresDB(cfg config.DBConfig) (*gorm.DB, error) {
 	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 		cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.DBName)
@@ -39,7 +48,7 @@ func NewPostgresDB(cfg config.DBConfig) (*gorm.DB, error) {
 	}
 
 	// Auto-migrate the schema
-	if err := db.AutoMigrate(&User{}, &FoodAnalysis{}); err != nil {
+	if err := db.AutoMigrate(&User{}, &FoodAnalysis{}, &BloodSugarRecord{}); err != nil {
 		return nil, fmt.Errorf("failed to migrate database: %w", err)
 	}
 
