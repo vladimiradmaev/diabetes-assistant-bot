@@ -70,7 +70,7 @@ Telegram бот для помощи в управлении диабетом. Б
 
 1. Клонируйте репозиторий:
 ```bash
-git clone https://github.com/yourusername/diabetes-helper.git
+git clone https://github.com/vladimiradmaev/diabetes-helper.git
 cd diabetes-helper
 ```
 
@@ -79,24 +79,42 @@ cd diabetes-helper
 go mod download
 ```
 
-3. Создайте файл конфигурации `configs/config.yaml`:
-```yaml
-bot:
-  token: "YOUR_TELEGRAM_BOT_TOKEN"
-  gemini_api_key: "YOUR_GEMINI_API_KEY"
-  openai_api_key: "YOUR_OPENAI_API_KEY"
+3. Создайте файл `.env` с необходимыми переменными окружения:
+```env
+# Telegram Bot
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+
+# AI Services
+GEMINI_API_KEY=your_gemini_api_key
+OPENAI_API_KEY=your_openai_api_key
+
+# Database
+DB_HOST=localhost
+DB_PORT=5432
+DB_USER=postgres
+DB_PASSWORD=your_password
+DB_NAME=diabetes_helper
 ```
 
-4. Запустите бота:
+4. Создайте базу данных PostgreSQL:
+```sql
+CREATE DATABASE diabetes_helper;
+```
+
+5. Запустите бота:
 ```bash
-go run cmd/bot/main.go
+go run main.go
 ```
 
-## Безопасность
+### Docker (опционально)
 
-- Все API ключи хранятся в конфигурационном файле
-- Данные пользователей хранятся локально в SQLite
-- Нет доступа к медицинским данным третьих лиц
+Альтернативно, вы можете запустить бота в Docker:
+
+1. Создайте файл `.env` как описано выше
+2. Запустите с помощью Docker Compose:
+```bash
+docker-compose up -d
+```
 
 ## Ограничения
 
