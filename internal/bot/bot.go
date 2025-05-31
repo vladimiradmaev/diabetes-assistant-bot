@@ -55,7 +55,6 @@ func (b *Bot) sendMainMenu(chatID int64) error {
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("🍽️ Анализ еды", "analyze_food"),
-			tgbotapi.NewInlineKeyboardButtonData("🩸 Уровень сахара", "blood_sugar"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("⚙️ Настройки", "settings"),
