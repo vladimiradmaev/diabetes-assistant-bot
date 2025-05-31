@@ -1079,8 +1079,7 @@ func (b *Bot) handlePhoto(ctx context.Context, message *tgbotapi.Message, user *
 	// Add navigation buttons
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🍽️ Анализ еды", "analyze_food"),
-			tgbotapi.NewInlineKeyboardButtonData("🩸 Уровень сахара", "blood_sugar"),
+			tgbotapi.NewInlineKeyboardButtonData("◀️ В главное меню", "main_menu"),
 		),
 	)
 	photoMsg.ReplyMarkup = keyboard
