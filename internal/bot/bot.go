@@ -71,7 +71,6 @@ func (b *Bot) sendSettingsMenu(chatID int64) error {
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("📊 Коэф. на ХЕ", "insulin_ratio"),
-			tgbotapi.NewInlineKeyboardButtonData("⏱️ Время активного инсулина", "active_insulin_time"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("◀️ Главное меню", "main_menu"),
@@ -228,6 +227,11 @@ func (b *Bot) handleUpdate(ctx context.Context, update tgbotapi.Update) error {
 
 	// Handle photo messages
 	if update.Message.Photo != nil {
+		if len(update.Message.Photo) > 1 {
+			msg := tgbotapi.NewMessage(chatID, "Пожалуйста, отправьте только ОДНО фото для анализа блюда. Если хотите проанализировать несколько блюд — отправьте каждое фото отдельным сообщением. Спасибо!")
+			_, err := b.api.Send(msg)
+			return err
+		}
 		if b.userStates[int64(user.ID)] != "analyzing_food" {
 			msg := tgbotapi.NewMessage(chatID, "Пожалуйста, сначала нажмите кнопку '🍽️ Анализ еды' в меню.")
 			_, err := b.api.Send(msg)
@@ -1056,13 +1060,39 @@ func (b *Bot) handlePhoto(ctx context.Context, message *tgbotapi.Message, user *
 	// Log weights for debugging
 	log.Printf("User weight: %.1f, Analysis weight: %.1f", weight, analysis.Weight)
 
+	// Convert confidence to string representation
+	var confidenceText string
+	switch {
+	case analysis.Confidence >= 0.8:
+		confidenceText = "высокая"
+	case analysis.Confidence >= 0.6:
+		confidenceText = "средняя"
+	default:
+		confidenceText = "низкая"
+	}
+
+	// Format insulin recommendation
+	var insulinText string
+	if analysis.InsulinRatio > 0 {
+		insulinText = fmt.Sprintf("💉 *Рекомендуемая доза инсулина:* %.1f ед.\n(%.1f ХЕ × %.1f ед/ХЕ)",
+			analysis.InsulinUnits,
+			analysis.BreadUnits,
+			analysis.InsulinRatio)
+	} else {
+		insulinText = "💉 *Рекомендация по инсулину:* не настроен коэффициент для текущего времени"
+	}
+
 	resultText := fmt.Sprintf("🍽️ *Анализ блюда*\n\n"+
 		"🍞 *Углеводы:* %.1f г\n"+
+		"🥖 *ХЕ:* %.1f\n"+
+		"%s\n"+
 		"🎯 *Уверенность:* %s\n"+
 		"%s\n\n"+
 		"📊 *Как считали:*\n%s",
 		analysis.Carbs,
-		analysis.Confidence,
+		analysis.BreadUnits,
+		insulinText,
+		confidenceText,
 		weightText,
 		escapedAnalysisText,
 	)

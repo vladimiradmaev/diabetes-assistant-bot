@@ -23,6 +23,7 @@ type FoodAnalysis struct {
 	ImageURL     string
 	Weight       float64
 	Carbs        float64
+	BreadUnits   float64 `gorm:"column:bread_units"`
 	Confidence   float64
 	AnalysisText string
 	UsedProvider string
