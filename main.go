@@ -4,34 +4,44 @@ import (
 	"context"
 	"log"
 	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 
 	"github.com/joho/godotenv"
 	"github.com/vladimiradmaev/diabetes-helper/internal/bot"
 	"github.com/vladimiradmaev/diabetes-helper/internal/config"
 	"github.com/vladimiradmaev/diabetes-helper/internal/database"
+	"github.com/vladimiradmaev/diabetes-helper/internal/logger"
 	"github.com/vladimiradmaev/diabetes-helper/internal/services"
 )
 
 func main() {
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	log.Println("Starting Diabetes Helper Bot...")
+	// Initialize logger first
+	if err := logger.Init(); err != nil {
+		log.Fatalf("Failed to initialize logger: %v", err)
+	}
+	defer logger.Close()
+
+	logger.Info("Starting Diabetes Helper Bot...")
 
 	if err := godotenv.Load(); err != nil {
-		log.Printf("Warning: .env file not found")
+		logger.Warning("Warning: .env file not found")
 	}
 
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		logger.Errorf("Failed to load config: %v", err)
+		os.Exit(1)
 	}
-	log.Println("Configuration loaded successfully")
+	logger.Info("Configuration loaded successfully")
 
 	db, err := database.NewPostgresDB(cfg.DB)
 	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
+		logger.Errorf("Failed to connect to database: %v", err)
+		os.Exit(1)
 	}
-	log.Println("Database connection established and migrations completed")
+	logger.Info("Database connection established and migrations completed")
 
 	// Initialize services
 	aiService := services.NewAIService(cfg.GeminiAPIKey, cfg.OpenAIAPIKey)
@@ -39,27 +49,42 @@ func main() {
 	foodAnalysisService := services.NewFoodAnalysisService(aiService, db)
 	bloodSugarService := services.NewBloodSugarService(db)
 	insulinService := services.NewInsulinService(db)
-	log.Println("Services initialized successfully")
+	logger.Info("Services initialized successfully")
 
 	// Initialize bot
 	telegramBot, err := bot.NewBot(cfg.TelegramToken, userService, foodAnalysisService, bloodSugarService, insulinService)
 	if err != nil {
-		log.Fatalf("Failed to create bot: %v", err)
+		logger.Errorf("Failed to create bot: %v", err)
+		os.Exit(1)
 	}
-	log.Println("Bot initialized successfully")
+	logger.Info("Bot initialized successfully")
+
+	// Create context for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	// Start bot in a goroutine
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		log.Println("Starting bot...")
-		if err := telegramBot.Start(context.Background()); err != nil {
-			log.Printf("Bot stopped with error: %v", err)
-			os.Exit(1)
+		logger.Info("Starting bot...")
+		if err := telegramBot.Start(ctx); err != nil {
+			if err != context.Canceled {
+				logger.Errorf("Bot stopped with error: %v", err)
+			}
 		}
 	}()
 
-	log.Println("Bot is running. Press Ctrl+C to stop.")
+	// Wait for interrupt signal
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	logger.Info("Bot is running. Press Ctrl+C to stop.")
+	<-sigChan
+	logger.Info("Received shutdown signal, stopping bot...")
+
+	cancel()
 	wg.Wait()
+	logger.Info("Bot stopped gracefully")
 }
