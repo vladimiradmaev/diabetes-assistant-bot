@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/vladimiradmaev/diabetes-helper/internal/database"
+	"github.com/vladimiradmaev/diabetes-helper/internal/utils"
 	"gorm.io/gorm"
 )
 
@@ -57,7 +58,6 @@ func (s *FoodAnalysisService) AnalyzeFood(ctx context.Context, userID uint, imag
 
 	// Get current time to find the appropriate insulin ratio
 	now := time.Now()
-	currentTime := fmt.Sprintf("%02d:%02d", now.Hour(), now.Minute())
 
 	// Get user's insulin ratios
 	var ratios []database.InsulinRatio
@@ -67,10 +67,25 @@ func (s *FoodAnalysisService) AnalyzeFood(ctx context.Context, userID uint, imag
 
 	// Find the appropriate ratio for current time
 	var insulinRatio float64
+	currentMinutes := now.Hour()*60 + now.Minute()
+
 	for _, r := range ratios {
-		if currentTime >= r.StartTime && currentTime <= r.EndTime {
-			insulinRatio = r.Ratio
-			break
+		startMinutes := utils.TimeToMinutes(r.StartTime)
+		endMinutes := utils.TimeToMinutes(r.EndTime)
+
+		// Handle periods that cross midnight (e.g., 13:00-00:00)
+		if endMinutes < startMinutes {
+			// Period crosses midnight
+			if currentMinutes >= startMinutes || currentMinutes <= endMinutes {
+				insulinRatio = r.Ratio
+				break
+			}
+		} else {
+			// Normal period within same day
+			if currentMinutes >= startMinutes && currentMinutes <= endMinutes {
+				insulinRatio = r.Ratio
+				break
+			}
 		}
 	}
 

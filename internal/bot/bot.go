@@ -10,6 +10,7 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/vladimiradmaev/diabetes-helper/internal/database"
+	"github.com/vladimiradmaev/diabetes-helper/internal/logger"
 	"github.com/vladimiradmaev/diabetes-helper/internal/services"
 )
 
@@ -38,7 +39,7 @@ func NewBot(token string, userService *services.UserService, foodAnalysisSvc *se
 		return nil, fmt.Errorf("failed to create bot: %w", err)
 	}
 
-	log.Printf("Bot authorized on account %s", api.Self.UserName)
+	logger.Infof("Bot authorized on account %s", api.Self.UserName)
 	return &Bot{
 		api:             api,
 		userService:     userService,
@@ -61,7 +62,23 @@ func (b *Bot) sendMainMenu(chatID int64) error {
 		),
 	)
 
-	msg := tgbotapi.NewMessage(chatID, "Выберите действие:")
+	text := `🤖 *ДиаАИ* — твой помощник для управления диабетом
+
+🍽️ Отправь фото еды, и я:
+• Определю количество углеводов
+• Рассчитаю хлебные единицы (ХЕ)  
+• Предложу дозу инсулина
+
+🤖 *ИИ модели:*
+• Gemini 2.0 Flash (до 1500 запросов/день)
+• Автоматическое переключение на OpenAI при превышении лимитов
+
+⚠️ *Важно:* Это справочная информация, всегда консультируйтесь с врачом!
+
+Выберите действие:`
+
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ParseMode = "Markdown"
 	msg.ReplyMarkup = keyboard
 	_, err := b.api.Send(msg)
 	return err
@@ -208,14 +225,14 @@ func (b *Bot) handleUpdate(ctx context.Context, update tgbotapi.Update) error {
 	if err != nil {
 		return fmt.Errorf("failed to register user: %w", err)
 	}
-	log.Printf("User registered/updated: %s (ID: %d)", user.Username, user.ID)
+	logger.Infof("User registered/updated: %s (ID: %d)", user.Username, user.ID)
 
 	// Handle callback queries (button clicks)
 	if update.CallbackQuery != nil {
 		// Answer callback query to remove loading state
 		callback := tgbotapi.NewCallback(update.CallbackQuery.ID, "")
 		if _, err := b.api.Request(callback); err != nil {
-			log.Printf("Failed to answer callback query: %v", err)
+			logger.Errorf("Failed to answer callback query: %v", err)
 		}
 		return b.handleCallbackQuery(ctx, update.CallbackQuery, user)
 	}
@@ -227,11 +244,6 @@ func (b *Bot) handleUpdate(ctx context.Context, update tgbotapi.Update) error {
 
 	// Handle photo messages
 	if update.Message.Photo != nil {
-		if len(update.Message.Photo) > 1 {
-			msg := tgbotapi.NewMessage(chatID, "Пожалуйста, отправьте только ОДНО фото для анализа блюда. Если хотите проанализировать несколько блюд — отправьте каждое фото отдельным сообщением. Спасибо!")
-			_, err := b.api.Send(msg)
-			return err
-		}
 		if b.userStates[int64(user.ID)] != "analyzing_food" {
 			msg := tgbotapi.NewMessage(chatID, "Пожалуйста, сначала нажмите кнопку '🍽️ Анализ еды' в меню.")
 			_, err := b.api.Send(msg)
@@ -653,7 +665,7 @@ func (b *Bot) handleCallbackQuery(ctx context.Context, query *tgbotapi.CallbackQ
 }
 
 func (b *Bot) handleCommand(ctx context.Context, message *tgbotapi.Message, user *database.User) error {
-	log.Printf("Handling command %s from user %d", message.Command(), user.ID)
+	logger.Infof("Handling command %s from user %d", message.Command(), user.ID)
 	switch message.Command() {
 	case "start":
 		b.userStates[int64(user.ID)] = stateNone
@@ -994,7 +1006,7 @@ func (b *Bot) handlePhoto(ctx context.Context, message *tgbotapi.Message, user *
 			_, err := b.api.Send(msg)
 			return err
 		}
-		log.Printf("User %d provided weight: %.1f g", user.ID, weight)
+		logger.Infof("User %d provided weight: %.1f g", user.ID, weight)
 	} else {
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Вес не указан. Я попробую оценить вес блюда автоматически.")
 		_, err := b.api.Send(msg)
@@ -1011,25 +1023,54 @@ func (b *Bot) handlePhoto(ctx context.Context, message *tgbotapi.Message, user *
 	}
 
 	// Analyze the image
-	log.Printf("Starting food analysis for user %d with Gemini", user.ID)
+	logger.Infof("Starting food analysis for user %d with Gemini", user.ID)
 	analysis, err := b.foodAnalysisSvc.AnalyzeFood(ctx, user.ID, file.Link(b.api.Token), weight, false)
 	if err != nil {
-		log.Printf("Gemini analysis failed for user %d, trying OpenAI: %v", user.ID, err)
+		// Check if it's a rate limit error
+		if strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "quota") || strings.Contains(err.Error(), "rate limit") {
+			logger.Warningf("Gemini rate limit exceeded for user %d, switching to OpenAI: %v", user.ID, err)
+			// Update processing message to inform user about the switch
+			editMsg := tgbotapi.NewEditMessageText(message.Chat.ID, sentMsg.MessageID, "Превышен лимит Gemini, переключаюсь на OpenAI...")
+			b.api.Send(editMsg)
+		} else {
+			logger.Errorf("Gemini analysis failed for user %d, trying OpenAI: %v", user.ID, err)
+		}
+
 		// Try OpenAI if Gemini fails
 		analysis, err = b.foodAnalysisSvc.AnalyzeFood(ctx, user.ID, file.Link(b.api.Token), weight, true)
 		if err != nil {
-			msg := tgbotapi.NewMessage(message.Chat.ID, "Извините, произошла ошибка при анализе изображения. Пожалуйста, попробуйте еще раз.")
+			msg := tgbotapi.NewMessage(message.Chat.ID, "Извините, произошла ошибка при анализе изображения. Пожалуйста, попробуйте еще раз через несколько минут.")
 			_, err := b.api.Send(msg)
 			return err
 		}
-		log.Printf("OpenAI analysis completed for user %d", user.ID)
+		logger.Infof("OpenAI analysis completed for user %d", user.ID)
 	} else {
-		log.Printf("Gemini analysis completed for user %d", user.ID)
+		logger.Infof("Gemini analysis completed for user %d", user.ID)
 	}
 
 	// Delete processing message
 	deleteMsg := tgbotapi.NewDeleteMessage(message.Chat.ID, sentMsg.MessageID)
 	b.api.Send(deleteMsg)
+
+	// Check if no food was detected
+	if analysis.Carbs == 0 && analysis.Weight == 0 && len(analysis.AnalysisText) > 0 &&
+		strings.Contains(analysis.AnalysisText, "не обнаружена еда") {
+		// Send a simple text message for non-food images
+		msg := tgbotapi.NewMessage(message.Chat.ID, analysis.AnalysisText)
+		keyboard := tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("◀️ В главное меню", "main_menu"),
+			),
+		)
+		msg.ReplyMarkup = keyboard
+		_, err = b.api.Send(msg)
+		if err != nil {
+			return fmt.Errorf("failed to send non-food message: %w", err)
+		}
+		// Reset user state
+		b.userStates[int64(user.ID)] = stateNone
+		return nil
+	}
 
 	// Escape only essential Markdown characters
 	escapedAnalysisText := strings.ReplaceAll(analysis.AnalysisText, "_", "\\_")
@@ -1058,7 +1099,7 @@ func (b *Bot) handlePhoto(ctx context.Context, message *tgbotapi.Message, user *
 	}
 
 	// Log weights for debugging
-	log.Printf("User weight: %.1f, Analysis weight: %.1f", weight, analysis.Weight)
+	logger.Debugf("User weight: %.1f, Analysis weight: %.1f", weight, analysis.Weight)
 
 	// Convert confidence to string representation
 	var confidenceText string
@@ -1142,10 +1183,10 @@ func (b *Bot) Start(ctx context.Context) error {
 			return ctx.Err()
 		case update := <-updates:
 			if update.Message != nil {
-				log.Printf("Received message from user %d: %s", update.Message.From.ID, update.Message.Text)
+				logger.Debugf("Received message from user %d: %s", update.Message.From.ID, update.Message.Text)
 			}
 			if err := b.handleUpdate(ctx, update); err != nil {
-				log.Printf("Error handling update: %v", err)
+				logger.Errorf("Error handling update: %v", err)
 			}
 		}
 	}

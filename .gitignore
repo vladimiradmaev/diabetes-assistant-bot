@@ -18,6 +18,10 @@ vendor/
 # Environment variables
 .env
 
+# Log files
+logs/
+*.log
+
 # IDE specific files
 .idea/
 .vscode/
