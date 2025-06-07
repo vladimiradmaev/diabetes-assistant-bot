@@ -43,11 +43,50 @@ clean: check-docker ## Остановить и удалить все конте�
 	$(DOCKER_COMPOSE_CMD) down -v
 	docker system prune -f
 
-logs: check-docker ## Показать логи приложения
+logs: check-docker ## Показать логи приложения (Docker + файловые логи)
+	@echo "$(GREEN)Показываем логи приложения...$(NC)"
+	@echo "$(YELLOW)Docker логи:$(NC)"
+	@$(DOCKER_COMPOSE_CMD) logs --tail=20 app || true
+	@echo "\n$(YELLOW)Файловые логи (если есть):$(NC)"
+	@if [ -f "./logs/app.log" ]; then \
+		tail -f ./logs/app.log; \
+	else \
+		echo "Файл ./logs/app.log не найден. Используйте 'make logs-docker' для Docker логов."; \
+		$(DOCKER_COMPOSE_CMD) logs -f app; \
+	fi
+
+logs-docker: check-docker ## Показать только Docker логи (stdout)
 	$(DOCKER_COMPOSE_CMD) logs -f app
+
+logs-file: ## Показать только файловые логи
+	@if [ -f "./logs/app.log" ]; then \
+		tail -f ./logs/app.log; \
+	else \
+		echo "$(RED)Файл ./logs/app.log не найден!$(NC)"; \
+		echo "$(YELLOW)Убедитесь, что LOG_OUTPUT=logs/app.log в .env$(NC)"; \
+	fi
 
 logs-db: check-docker ## Показать логи базы данных
 	$(DOCKER_COMPOSE_CMD) logs -f db
+
+# Команды для переключения режимов логирования
+logs-to-stdout: check-docker ## Переключить логи в stdout (для продакшена)
+	@echo "$(GREEN)Переключаем логи в stdout режим...$(NC)"
+	@echo "LOG_OUTPUT=stdout" > .env.logging
+	@echo "LOG_FORMAT=json" >> .env.logging
+	@echo "$(YELLOW)Перезапускаем приложение...$(NC)"
+	$(DOCKER_COMPOSE_CMD) down
+	$(DOCKER_COMPOSE_CMD) up -d
+	@echo "$(GREEN)Теперь используйте 'make logs-docker' для просмотра логов$(NC)"
+
+logs-to-file: check-docker ## Переключить логи в файл (для разработки)
+	@echo "$(GREEN)Переключаем логи в файловый режим...$(NC)"
+	@echo "LOG_OUTPUT=logs/app.log" > .env.logging
+	@echo "LOG_FORMAT=json" >> .env.logging
+	@echo "$(YELLOW)Перезапускаем приложение...$(NC)"
+	$(DOCKER_COMPOSE_CMD) down
+	$(DOCKER_COMPOSE_CMD) up -d
+	@echo "$(GREEN)Теперь используйте 'make logs-file' для просмотра логов$(NC)"
 
 status: check-docker ## Показать статус сервисов
 	$(DOCKER_COMPOSE_CMD) ps
@@ -70,4 +109,20 @@ local-run: local-db ## Запустить приложение локально 
 	@echo "$(GREEN)Ожидание готовности базы данных...$(NC)"
 	@until $(DOCKER_COMPOSE_CMD) exec db pg_isready -U postgres; do sleep 1; done
 	@echo "$(GREEN)База данных готова. Запуск приложения...$(NC)"
-	go run main.go 
+	go run main.go
+
+# Команды для валидации
+validate-config: ## Проверить валидность конфигурации
+	@echo "$(GREEN)Проверка конфигурации...$(NC)"
+	go run cmd/validate-config/main.go
+
+test-config: ## Протестировать валидацию с разными параметрами
+	@echo "$(GREEN)Тестирование валидации конфигурации...$(NC)"
+	@echo "\n$(YELLOW)1. Тест с пустыми обязательными параметрами:$(NC)"
+	@TELEGRAM_BOT_TOKEN="" GEMINI_API_KEY="" go run cmd/validate-config/main.go || true
+	@echo "\n$(YELLOW)2. Тест с неправильным портом БД:$(NC)"
+	@DB_PORT="invalid" go run cmd/validate-config/main.go || true
+	@echo "\n$(YELLOW)3. Тест с неправильным форматом логов:$(NC)"
+	@LOG_FORMAT="xml" go run cmd/validate-config/main.go || true
+	@echo "\n$(YELLOW)4. Тест с правильной конфигурацией:$(NC)"
+	@go run cmd/validate-config/main.go 
