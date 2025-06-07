@@ -1083,7 +1083,7 @@ func (b *Bot) handlePhoto(ctx context.Context, message *tgbotapi.Message, user *
 	}
 
 	// Log weights for debugging
-	logger.Debugf("User weight: %.1f, Analysis weight: %.1f", weight, analysis.Weight)
+	logger.Debug("Weight comparison", "user_weight", weight, "analysis_weight", analysis.Weight)
 
 	// Convert confidence to string representation
 	var confidenceText string
@@ -1167,10 +1167,10 @@ func (b *Bot) Start(ctx context.Context) error {
 			return ctx.Err()
 		case update := <-updates:
 			if update.Message != nil {
-				logger.Debugf("Received message from user %d: %s", update.Message.From.ID, update.Message.Text)
+				logger.Debug("Received message", "user_id", update.Message.From.ID, "text", update.Message.Text)
 			}
 			if err := b.handleUpdate(ctx, update); err != nil {
-				logger.Errorf("Error handling update: %v", err)
+				logger.Error("Error handling update", "error", err)
 			}
 		}
 	}

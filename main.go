@@ -17,28 +17,43 @@ import (
 )
 
 func main() {
-	// Initialize logger first
+	// Initialize basic logger first
 	if err := logger.Init(); err != nil {
 		log.Fatalf("Failed to initialize logger: %v", err)
 	}
 	defer logger.Close()
 
-	logger.Info("Starting Diabetes Helper Bot...")
+	ctx := context.Background()
 
 	if err := godotenv.Load(); err != nil {
-		logger.Warning("Warning: .env file not found")
+		logger.Warning("Warning: .env file not found", "error", err.Error())
 	}
 
 	cfg, err := config.Load()
 	if err != nil {
-		logger.Errorf("Failed to load config: %v", err)
+		logger.Error("Failed to load config", "error", err)
 		os.Exit(1)
 	}
+
+	// Reinitialize logger with config
+	if err := logger.InitWithConfig(logger.Config{
+		Level:      cfg.Logger.Level,
+		OutputPath: cfg.Logger.OutputPath,
+		Format:     cfg.Logger.Format,
+	}); err != nil {
+		logger.Error("Failed to reinitialize logger with config", "error", err)
+		os.Exit(1)
+	}
+
+	logger.Info("Starting Diabetes Helper Bot...",
+		"version", "1.0.0",
+		"log_level", cfg.Logger.Level,
+		"log_format", cfg.Logger.Format)
 	logger.Info("Configuration loaded successfully")
 
 	db, err := database.NewPostgresDB(cfg.DB)
 	if err != nil {
-		logger.Errorf("Failed to connect to database: %v", err)
+		logger.Error("Failed to connect to database", "error", err)
 		os.Exit(1)
 	}
 	logger.Info("Database connection established and migrations completed")
@@ -54,7 +69,7 @@ func main() {
 	// Initialize bot
 	telegramBot, err := bot.NewBot(cfg.TelegramToken, userService, foodAnalysisService, bloodSugarService, insulinService)
 	if err != nil {
-		logger.Errorf("Failed to create bot: %v", err)
+		logger.Error("Failed to create bot", "error", err)
 		os.Exit(1)
 	}
 	logger.Info("Bot initialized successfully")
@@ -71,7 +86,7 @@ func main() {
 		logger.Info("Starting bot...")
 		if err := telegramBot.Start(ctx); err != nil {
 			if err != context.Canceled {
-				logger.Errorf("Bot stopped with error: %v", err)
+				logger.Error("Bot stopped with error", "error", err)
 			}
 		}
 	}()

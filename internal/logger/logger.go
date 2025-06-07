@@ -1,146 +1,166 @@
 package logger
 
 import (
+	"context"
 	"fmt"
-	"io"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
-	"time"
 )
 
-type Logger struct {
-	infoLogger    *log.Logger
-	errorLogger   *log.Logger
-	debugLogger   *log.Logger
-	warningLogger *log.Logger
-	file          *os.File
+var globalLogger *slog.Logger
+
+// LogLevel represents different log levels
+type LogLevel int
+
+const (
+	LevelDebug LogLevel = iota
+	LevelInfo
+	LevelWarn
+	LevelError
+)
+
+// Config holds logger configuration
+type Config struct {
+	Level      LogLevel
+	OutputPath string
+	Format     string // "json" or "text"
 }
 
-var GlobalLogger *Logger
-
+// Init initializes the structured logger
 func Init() error {
+	return InitWithConfig(Config{
+		Level:      LevelInfo,
+		OutputPath: "logs/app.log",
+		Format:     "json",
+	})
+}
+
+// InitWithConfig initializes logger with custom config
+func InitWithConfig(config Config) error {
 	// Create logs directory if it doesn't exist
-	logsDir := "logs"
-	if err := os.MkdirAll(logsDir, 0755); err != nil {
-		return fmt.Errorf("failed to create logs directory: %w", err)
+	if config.OutputPath != "" {
+		dir := filepath.Dir(config.OutputPath)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
 	}
 
-	// Create log file with timestamp
-	timestamp := time.Now().Format("2006-01-02")
-	logFileName := filepath.Join(logsDir, fmt.Sprintf("diabetes-helper-%s.log", timestamp))
-
-	file, err := os.OpenFile(logFileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-	if err != nil {
-		return fmt.Errorf("failed to open log file: %w", err)
+	// Configure output
+	var output *os.File
+	var err error
+	if config.OutputPath == "" || config.OutputPath == "stdout" {
+		output = os.Stdout
+	} else {
+		output, err = os.OpenFile(config.OutputPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+		if err != nil {
+			return err
+		}
 	}
 
-	// Create multi-writer to write to both file and console
-	multiWriter := io.MultiWriter(os.Stdout, file)
-
-	GlobalLogger = &Logger{
-		infoLogger:    log.New(multiWriter, "[INFO] ", log.Ldate|log.Ltime|log.Lshortfile),
-		errorLogger:   log.New(multiWriter, "[ERROR] ", log.Ldate|log.Ltime|log.Lshortfile),
-		debugLogger:   log.New(multiWriter, "[DEBUG] ", log.Ldate|log.Ltime|log.Lshortfile),
-		warningLogger: log.New(multiWriter, "[WARNING] ", log.Ldate|log.Ltime|log.Lshortfile),
-		file:          file,
+	// Convert log level
+	var level slog.Level
+	switch config.Level {
+	case LevelDebug:
+		level = slog.LevelDebug
+	case LevelInfo:
+		level = slog.LevelInfo
+	case LevelWarn:
+		level = slog.LevelWarn
+	case LevelError:
+		level = slog.LevelError
+	default:
+		level = slog.LevelInfo
 	}
 
-	GlobalLogger.Info("Logger initialized successfully")
+	// Create handler based on format
+	var handler slog.Handler
+	opts := &slog.HandlerOptions{
+		Level:     level,
+		AddSource: true,
+	}
+
+	if config.Format == "json" {
+		handler = slog.NewJSONHandler(output, opts)
+	} else {
+		handler = slog.NewTextHandler(output, opts)
+	}
+
+	globalLogger = slog.New(handler)
+	slog.SetDefault(globalLogger)
+
 	return nil
 }
 
-func (l *Logger) Info(v ...interface{}) {
-	l.infoLogger.Println(v...)
-}
-
-func (l *Logger) Infof(format string, v ...interface{}) {
-	l.infoLogger.Printf(format, v...)
-}
-
-func (l *Logger) Error(v ...interface{}) {
-	l.errorLogger.Println(v...)
-}
-
-func (l *Logger) Errorf(format string, v ...interface{}) {
-	l.errorLogger.Printf(format, v...)
-}
-
-func (l *Logger) Debug(v ...interface{}) {
-	l.debugLogger.Println(v...)
-}
-
-func (l *Logger) Debugf(format string, v ...interface{}) {
-	l.debugLogger.Printf(format, v...)
-}
-
-func (l *Logger) Warning(v ...interface{}) {
-	l.warningLogger.Println(v...)
-}
-
-func (l *Logger) Warningf(format string, v ...interface{}) {
-	l.warningLogger.Printf(format, v...)
-}
-
-func (l *Logger) Close() error {
-	if l.file != nil {
-		return l.file.Close()
-	}
-	return nil
-}
-
-// Convenience functions for global logger
-func Info(v ...interface{}) {
-	if GlobalLogger != nil {
-		GlobalLogger.Info(v...)
-	}
-}
-
-func Infof(format string, v ...interface{}) {
-	if GlobalLogger != nil {
-		GlobalLogger.Infof(format, v...)
-	}
-}
-
-func Error(v ...interface{}) {
-	if GlobalLogger != nil {
-		GlobalLogger.Error(v...)
-	}
-}
-
-func Errorf(format string, v ...interface{}) {
-	if GlobalLogger != nil {
-		GlobalLogger.Errorf(format, v...)
-	}
-}
-
-func Debug(v ...interface{}) {
-	if GlobalLogger != nil {
-		GlobalLogger.Debug(v...)
-	}
-}
-
-func Debugf(format string, v ...interface{}) {
-	if GlobalLogger != nil {
-		GlobalLogger.Debugf(format, v...)
-	}
-}
-
-func Warning(v ...interface{}) {
-	if GlobalLogger != nil {
-		GlobalLogger.Warning(v...)
-	}
-}
-
-func Warningf(format string, v ...interface{}) {
-	if GlobalLogger != nil {
-		GlobalLogger.Warningf(format, v...)
-	}
-}
-
+// Close closes the logger (for compatibility)
 func Close() error {
-	if GlobalLogger != nil {
-		return GlobalLogger.Close()
-	}
+	// slog doesn't need explicit closing
 	return nil
+}
+
+// WithContext returns a logger with context values
+func WithContext(ctx context.Context) *slog.Logger {
+	return globalLogger
+}
+
+// WithFields returns a logger with additional fields
+func WithFields(fields ...any) *slog.Logger {
+	return globalLogger.With(fields...)
+}
+
+// Debug logs a debug message
+func Debug(msg string, args ...any) {
+	globalLogger.Debug(msg, args...)
+}
+
+// Info logs an info message
+func Info(msg string, args ...any) {
+	globalLogger.Info(msg, args...)
+}
+
+// Warn logs a warning message
+func Warn(msg string, args ...any) {
+	globalLogger.Warn(msg, args...)
+}
+
+// Warning logs a warning message (for compatibility)
+func Warning(msg string, args ...any) {
+	globalLogger.Warn(msg, args...)
+}
+
+// Error logs an error message
+func Error(msg string, args ...any) {
+	globalLogger.Error(msg, args...)
+}
+
+// Infof logs an info message with formatting
+func Infof(format string, args ...any) {
+	globalLogger.Info(fmt.Sprintf(format, args...))
+}
+
+// Warningf logs a warning message with formatting
+func Warningf(format string, args ...any) {
+	globalLogger.Warn(fmt.Sprintf(format, args...))
+}
+
+// Errorf logs an error message with formatting
+func Errorf(format string, args ...any) {
+	globalLogger.Error(fmt.Sprintf(format, args...))
+}
+
+// Fatal logs a fatal message and exits
+func Fatal(msg string, args ...any) {
+	globalLogger.Error(msg, args...)
+	os.Exit(1)
+}
+
+// Fatalf logs a fatal message with formatting and exits
+func Fatalf(format string, args ...any) {
+	globalLogger.Error(fmt.Sprintf(format, args...))
+	os.Exit(1)
+}
+
+// GetLogger returns the global logger instance
+func GetLogger() *slog.Logger {
+	return globalLogger
 }
