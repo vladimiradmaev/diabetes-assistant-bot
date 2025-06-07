@@ -43,8 +43,8 @@ func main() {
 	}
 	logger.Info("Database connection established and migrations completed")
 
-	// Initialize services
-	aiService := services.NewAIService(cfg.GeminiAPIKey, cfg.OpenAIAPIKey)
+	// Initialize AI service
+	aiService := services.NewAIService(cfg.GeminiAPIKey)
 	userService := services.NewUserService(db)
 	foodAnalysisService := services.NewFoodAnalysisService(aiService, db)
 	bloodSugarService := services.NewBloodSugarService(db)

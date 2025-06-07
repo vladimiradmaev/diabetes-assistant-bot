@@ -6,7 +6,7 @@ WORKDIR /app
 RUN apk add --no-cache git
 
 # Copy go mod and sum files
-COPY go.mod ./
+COPY go.mod go.sum ./
 
 # Download dependencies
 RUN go mod download
@@ -24,6 +24,9 @@ WORKDIR /app
 
 # Copy the binary from builder
 COPY --from=builder /app/diabetes-helper .
+
+# Copy the entire internal directory to preserve structure
+COPY --from=builder /app/internal ./internal
 
 # Copy .env file
 COPY .env .

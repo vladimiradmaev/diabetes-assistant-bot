@@ -29,8 +29,8 @@ func NewFoodAnalysisService(aiService *AIService, db *gorm.DB) *FoodAnalysisServ
 	}
 }
 
-func (s *FoodAnalysisService) AnalyzeFood(ctx context.Context, userID uint, imageURL string, weight float64, useOpenAI bool) (*database.FoodAnalysis, error) {
-	result, err := s.aiService.AnalyzeFoodImage(ctx, imageURL, weight, useOpenAI)
+func (s *FoodAnalysisService) AnalyzeFood(ctx context.Context, userID uint, imageURL string, weight float64) (*database.FoodAnalysis, error) {
+	result, err := s.aiService.AnalyzeFoodImage(ctx, imageURL, weight)
 	if err != nil {
 		return nil, fmt.Errorf("failed to analyze food image: %w", err)
 	}
@@ -100,12 +100,9 @@ func (s *FoodAnalysisService) AnalyzeFood(ctx context.Context, userID uint, imag
 		BreadUnits:   breadUnits,
 		Confidence:   confidence,
 		AnalysisText: result.AnalysisText,
-		UsedProvider: "openai",
+		UsedProvider: "gemini",
 		InsulinRatio: insulinRatio,
 		InsulinUnits: insulinUnits,
-	}
-	if !useOpenAI {
-		analysis.UsedProvider = "gemini"
 	}
 
 	if err := s.db.WithContext(ctx).Create(analysis).Error; err != nil {

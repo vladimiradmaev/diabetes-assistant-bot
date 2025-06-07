@@ -7,7 +7,6 @@ import (
 type Config struct {
 	TelegramToken string
 	GeminiAPIKey  string
-	OpenAIAPIKey  string
 	DB            DBConfig
 }
 
@@ -19,17 +18,23 @@ type DBConfig struct {
 	DBName   string
 }
 
+func getEnvOrDefault(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
+
 func Load() (*Config, error) {
 	return &Config{
 		TelegramToken: os.Getenv("TELEGRAM_BOT_TOKEN"),
 		GeminiAPIKey:  os.Getenv("GEMINI_API_KEY"),
-		OpenAIAPIKey:  os.Getenv("OPENAI_API_KEY"),
 		DB: DBConfig{
-			Host:     os.Getenv("DB_HOST"),
-			Port:     os.Getenv("DB_PORT"),
-			User:     os.Getenv("DB_USER"),
-			Password: os.Getenv("DB_PASSWORD"),
-			DBName:   os.Getenv("DB_NAME"),
+			Host:     getEnvOrDefault("DB_HOST", "localhost"),
+			Port:     getEnvOrDefault("DB_PORT", "5432"),
+			User:     getEnvOrDefault("DB_USER", "postgres"),
+			Password: getEnvOrDefault("DB_PASSWORD", "postgres"),
+			DBName:   getEnvOrDefault("DB_NAME", "diabetes_helper"),
 		},
 	}, nil
 }
