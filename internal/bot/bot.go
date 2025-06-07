@@ -1024,29 +1024,13 @@ func (b *Bot) handlePhoto(ctx context.Context, message *tgbotapi.Message, user *
 
 	// Analyze the image
 	logger.Infof("Starting food analysis for user %d with Gemini", user.ID)
-	analysis, err := b.foodAnalysisSvc.AnalyzeFood(ctx, user.ID, file.Link(b.api.Token), weight, false)
+	analysis, err := b.foodAnalysisSvc.AnalyzeFood(ctx, user.ID, file.Link(b.api.Token), weight)
 	if err != nil {
-		// Check if it's a rate limit error
-		if strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "quota") || strings.Contains(err.Error(), "rate limit") {
-			logger.Warningf("Gemini rate limit exceeded for user %d, switching to OpenAI: %v", user.ID, err)
-			// Update processing message to inform user about the switch
-			editMsg := tgbotapi.NewEditMessageText(message.Chat.ID, sentMsg.MessageID, "Превышен лимит Gemini, переключаюсь на OpenAI...")
-			b.api.Send(editMsg)
-		} else {
-			logger.Errorf("Gemini analysis failed for user %d, trying OpenAI: %v", user.ID, err)
-		}
-
-		// Try OpenAI if Gemini fails
-		analysis, err = b.foodAnalysisSvc.AnalyzeFood(ctx, user.ID, file.Link(b.api.Token), weight, true)
-		if err != nil {
-			msg := tgbotapi.NewMessage(message.Chat.ID, "Извините, произошла ошибка при анализе изображения. Пожалуйста, попробуйте еще раз через несколько минут.")
-			_, err := b.api.Send(msg)
-			return err
-		}
-		logger.Infof("OpenAI analysis completed for user %d", user.ID)
-	} else {
-		logger.Infof("Gemini analysis completed for user %d", user.ID)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Извините, произошла ошибка при анализе изображения. Пожалуйста, попробуйте еще раз через несколько минут.")
+		_, err := b.api.Send(msg)
+		return err
 	}
+	logger.Infof("Food analysis completed for user %d", user.ID)
 
 	// Delete processing message
 	deleteMsg := tgbotapi.NewDeleteMessage(message.Chat.ID, sentMsg.MessageID)

@@ -6,7 +6,6 @@ require (
 	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1
 	github.com/google/generative-ai-go v0.11.0
 	github.com/joho/godotenv v1.5.1
-	github.com/sashabaranov/go-openai v1.20.2
 	google.golang.org/api v0.172.0
 	gorm.io/driver/postgres v1.5.7
 	gorm.io/gorm v1.25.7

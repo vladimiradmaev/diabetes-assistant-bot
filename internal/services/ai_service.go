@@ -5,14 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/generative-ai-go/genai"
-	"github.com/sashabaranov/go-openai"
 	"github.com/vladimiradmaev/diabetes-helper/internal/logger"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
@@ -20,9 +18,6 @@ import (
 
 type AIService struct {
 	geminiClient *genai.Client
-	openaiClient *openai.Client
-	hasOpenAIKey bool
-	hasGeminiKey bool
 }
 
 type FoodAnalysisResult struct {
@@ -33,108 +28,78 @@ type FoodAnalysisResult struct {
 	Weight       float64  `json:"weight"`
 }
 
-func NewAIService(geminiAPIKey, openaiAPIKey string) *AIService {
-	service := &AIService{
-		hasGeminiKey: geminiAPIKey != "",
-		hasOpenAIKey: openaiAPIKey != "",
-	}
+func NewAIService(geminiAPIKey string) *AIService {
+	service := &AIService{}
 
-	// Initialize Gemini client only if key is provided
-	if service.hasGeminiKey {
+	// Initialize Gemini client
+	if geminiAPIKey != "" {
 		logger.Infof("Initializing Gemini client with API key (length: %d)", len(geminiAPIKey))
-		geminiClient, err := genai.NewClient(context.Background(), option.WithAPIKey(geminiAPIKey))
+		ctx := context.Background()
+		client, err := genai.NewClient(ctx, option.WithAPIKey(geminiAPIKey))
 		if err != nil {
-			logger.Errorf("Failed to create Gemini client: %v", err)
-			service.hasGeminiKey = false
+			logger.Errorf("Failed to initialize Gemini client: %v", err)
 		} else {
-			service.geminiClient = geminiClient
+			service.geminiClient = client
 			logger.Info("Gemini client initialized successfully")
 
 			// Test model availability
-			_ = geminiClient.GenerativeModel("gemini-2.0-flash")
 			logger.Infof("Testing Gemini model availability: %s", "gemini-2.0-flash")
 		}
 	} else {
-		logger.Warning("Gemini API key not provided, Gemini features will be disabled")
-	}
-
-	// Initialize OpenAI client only if key is provided
-	if service.hasOpenAIKey {
-		service.openaiClient = openai.NewClient(openaiAPIKey)
-		logger.Info("OpenAI client initialized successfully")
-	} else {
-		logger.Warning("OpenAI API key not provided, OpenAI features will be disabled")
-	}
-
-	// Ensure at least one AI service is available
-	if !service.hasGeminiKey && !service.hasOpenAIKey {
-		panic("No AI API keys provided. Please set either GEMINI_API_KEY or OPENAI_API_KEY")
+		logger.Error("Gemini API key not provided")
 	}
 
 	return service
 }
 
-// retryWithBackoff выполняет функцию с экспоненциальной задержкой при ошибках 429
 func retryWithBackoff(ctx context.Context, maxRetries int, fn func() error) error {
 	var lastErr error
+	for i := 0; i < maxRetries; i++ {
+		if err := fn(); err != nil {
+			lastErr = err
 
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		err := fn()
-		if err == nil {
-			return nil
-		}
+			// Check if it's a retryable error
+			if googleErr, ok := err.(*googleapi.Error); ok {
+				if googleErr.Code == 429 || googleErr.Code >= 500 {
+					// Rate limit or server error - retry with backoff
+					backoff := time.Duration(i+1) * time.Second
+					logger.Warningf("Retryable error occurred (attempt %d/%d): %v. Retrying in %v", i+1, maxRetries, err, backoff)
 
-		lastErr = err
-
-		// Проверяем, является ли ошибка 429 (Too Many Requests)
-		if googleErr, ok := err.(*googleapi.Error); ok && googleErr.Code == 429 {
-			if attempt < maxRetries {
-				// Экспоненциальная задержка: 2^attempt секунд + jitter
-				delay := time.Duration(math.Pow(2, float64(attempt))) * time.Second
-				if delay > 60*time.Second {
-					delay = 60 * time.Second // Максимум 60 секунд
+					select {
+					case <-time.After(backoff):
+						continue
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				} else {
+					// Non-retryable error
+					logger.Errorf("Non-retryable error occurred: %v", err)
+					return err
 				}
-
-				logger.Warningf("Rate limit exceeded (429), retrying in %v... (attempt %d/%d)", delay, attempt+1, maxRetries+1)
+			} else {
+				// Other errors - retry with backoff
+				backoff := time.Duration(i+1) * time.Second
+				logger.Warningf("Error occurred (attempt %d/%d): %v. Retrying in %v", i+1, maxRetries, err, backoff)
 
 				select {
+				case <-time.After(backoff):
+					continue
 				case <-ctx.Done():
 					return ctx.Err()
-				case <-time.After(delay):
-					continue
 				}
 			}
 		} else {
-			// Если это не 429 ошибка, не повторяем
-			logger.Errorf("Non-retryable error occurred: %v", err)
-			return err
+			return nil
 		}
 	}
-
-	logger.Errorf("Max retries exceeded for operation: %v", lastErr)
-	return fmt.Errorf("max retries exceeded: %w", lastErr)
+	return lastErr
 }
 
-func (s *AIService) AnalyzeFoodImage(ctx context.Context, imageURL string, weight float64, useOpenAI bool) (*FoodAnalysisResult, error) {
-	logger.Infof("Starting food image analysis, imageURL: %s, weight: %.1f g, useOpenAI: %v", imageURL, weight, useOpenAI)
+func (s *AIService) AnalyzeFoodImage(ctx context.Context, imageURL string, weight float64) (*FoodAnalysisResult, error) {
+	logger.Infof("Starting food image analysis, imageURL: %s, weight: %.1f g", imageURL, weight)
 
-	// Check if requested AI service is available
-	if useOpenAI && !s.hasOpenAIKey {
-		if s.hasGeminiKey {
-			logger.Warning("OpenAI requested but not available, switching to Gemini")
-			useOpenAI = false
-		} else {
-			return nil, fmt.Errorf("OpenAI requested but API key not provided")
-		}
-	}
-
-	if !useOpenAI && !s.hasGeminiKey {
-		if s.hasOpenAIKey {
-			logger.Warning("Gemini requested but not available, switching to OpenAI")
-			useOpenAI = true
-		} else {
-			return nil, fmt.Errorf("Gemini requested but API key not provided")
-		}
+	if s.geminiClient == nil {
+		return nil, fmt.Errorf("Gemini client not available")
 	}
 
 	var estimatedWeight float64
@@ -143,23 +108,18 @@ func (s *AIService) AnalyzeFoodImage(ctx context.Context, imageURL string, weigh
 	if weight <= 0 {
 		logger.Info("No weight provided, estimating weight from image")
 		// If no weight provided, estimate it first
-		estimatedWeight, err = s.estimateWeight(ctx, imageURL, useOpenAI)
+		estimatedWeight, err = s.estimateWeight(ctx, imageURL)
 		if err != nil {
-			logger.Errorf("Failed to estimate weight: %v", err)
-			return nil, fmt.Errorf("failed to estimate weight: %w", err)
+			logger.Warningf("Failed to estimate weight: %v", err)
+			// Не возвращаем ошибку, а продолжаем анализ без веса
+			logger.Info("Continuing analysis without weight estimation")
+		} else {
+			weight = estimatedWeight
+			logger.Infof("Estimated weight: %.1f g", weight)
 		}
-		weight = estimatedWeight
-		logger.Infof("Estimated weight: %.1f g", weight)
 	}
 
-	var result *FoodAnalysisResult
-	if useOpenAI {
-		logger.Info("Using OpenAI for food analysis")
-		result, err = s.analyzeWithOpenAI(ctx, imageURL, weight)
-	} else {
-		logger.Info("Using Gemini for food analysis")
-		result, err = s.analyzeWithGemini(ctx, imageURL, weight)
-	}
+	result, err := s.analyzeWithGemini(ctx, imageURL, weight)
 	if err != nil {
 		logger.Errorf("Food analysis failed: %v", err)
 		return nil, err
@@ -174,25 +134,11 @@ func (s *AIService) AnalyzeFoodImage(ctx context.Context, imageURL string, weigh
 	return result, nil
 }
 
-func (s *AIService) estimateWeight(ctx context.Context, imageURL string, useOpenAI bool) (float64, error) {
-	if useOpenAI && s.hasOpenAIKey {
-		return s.estimateWeightWithOpenAI(ctx, imageURL)
+func (s *AIService) estimateWeight(ctx context.Context, imageURL string) (float64, error) {
+	if s.geminiClient == nil {
+		return 0, fmt.Errorf("Gemini client not available for weight estimation")
 	}
-	if !useOpenAI && s.hasGeminiKey {
-		return s.estimateWeightWithGemini(ctx, imageURL)
-	}
-
-	// Fallback logic
-	if s.hasGeminiKey {
-		logger.Warning("Falling back to Gemini for weight estimation")
-		return s.estimateWeightWithGemini(ctx, imageURL)
-	}
-	if s.hasOpenAIKey {
-		logger.Warning("Falling back to OpenAI for weight estimation")
-		return s.estimateWeightWithOpenAI(ctx, imageURL)
-	}
-
-	return 0, fmt.Errorf("no AI service available for weight estimation")
+	return s.estimateWeightWithGemini(ctx, imageURL)
 }
 
 func (s *AIService) estimateWeightWithGemini(ctx context.Context, imageURL string) (float64, error) {
@@ -210,9 +156,32 @@ func (s *AIService) estimateWeightWithGemini(ctx context.Context, imageURL strin
 		return 0, fmt.Errorf("failed to read image data: %w", err)
 	}
 
-	prompt := `Estimate food weight in grams. Consider portion sizes and plate size.
-Standard portions: rice/pasta 150-200g, meat 100-150g, vegetables 100-150g.
-Return ONLY the number (e.g., 150).`
+	prompt := `Оцени вес еды в граммах, используя визуальные подсказки:
+
+РЕФЕРЕНСНЫЕ ОБЪЕКТЫ для масштаба:
+- Тарелка стандартная: диаметр 24-26см
+- Столовая ложка: длина 20см
+- Вилка: длина 20см  
+- Стакан: высота 10-12см, диаметр 7-8см
+- Чашка кофе: диаметр 8-9см
+- Монета (если видна): диаметр 2-2.5см
+
+ТИПИЧНЫЕ ПОРЦИИ:
+- Рис/гречка/макароны: 150-250г (размер кулака)
+- Мясо/рыба: 100-200г (размер ладони)
+- Овощи свежие: 100-200г
+- Хлеб (ломтик): 25-30г
+- Картофель (средний): 100-150г
+- Яйцо: 50-60г
+- Сыр (кусок): 30-50г
+
+АНАЛИЗИРУЙ:
+1. Размер порции относительно тарелки/посуды
+2. Толщину/высоту блюда
+3. Плотность продуктов (мясо тяжелее овощей)
+4. Количество компонентов
+
+Верни ТОЛЬКО число в граммах (например: 180)`
 
 	var weight float64
 	err = retryWithBackoff(ctx, 3, func() error {
@@ -246,9 +215,19 @@ Return ONLY the number (e.g., 150).`
 		}
 
 		responseText := geminiResp.Candidates[0].Content.Parts[0].(genai.Text)
-		parsedWeight, parseErr := strconv.ParseFloat(strings.TrimSpace(string(responseText)), 64)
+		responseStr := strings.TrimSpace(string(responseText))
+
+		// Проверяем, содержит ли ответ только число
+		if strings.Contains(strings.ToLower(responseStr), "невозможно") ||
+			strings.Contains(strings.ToLower(responseStr), "нет еды") ||
+			strings.Contains(strings.ToLower(responseStr), "не видно") ||
+			len(responseStr) > 10 { // Если ответ слишком длинный, это не число
+			return fmt.Errorf("AI не смог определить вес: %s", responseStr)
+		}
+
+		parsedWeight, parseErr := strconv.ParseFloat(responseStr, 64)
 		if parseErr != nil {
-			return fmt.Errorf("failed to parse weight: %w", parseErr)
+			return fmt.Errorf("failed to parse weight from response '%s': %w", responseStr, parseErr)
 		}
 
 		weight = parsedWeight
@@ -257,46 +236,6 @@ Return ONLY the number (e.g., 150).`
 
 	if err != nil {
 		return 0, fmt.Errorf("failed to estimate weight with retries: %w", err)
-	}
-
-	return weight, nil
-}
-
-func (s *AIService) estimateWeightWithOpenAI(ctx context.Context, imageURL string) (float64, error) {
-	prompt := `Estimate food weight in grams. Consider portion sizes and plate size.
-Standard portions: rice/pasta 150-200g, meat 100-150g, vegetables 100-150g.
-Return ONLY the number (e.g., 150).`
-
-	resp, err := s.openaiClient.CreateChatCompletion(
-		ctx,
-		openai.ChatCompletionRequest{
-			Model: openai.GPT4VisionPreview,
-			Messages: []openai.ChatCompletionMessage{
-				{
-					Role: openai.ChatMessageRoleUser,
-					MultiContent: []openai.ChatMessagePart{
-						{
-							Type: openai.ChatMessagePartTypeText,
-							Text: prompt,
-						},
-						{
-							Type: openai.ChatMessagePartTypeImageURL,
-							ImageURL: &openai.ChatMessageImageURL{
-								URL: imageURL,
-							},
-						},
-					},
-				},
-			},
-		},
-	)
-	if err != nil {
-		return 0, fmt.Errorf("failed to create chat completion: %w", err)
-	}
-
-	weight, err := strconv.ParseFloat(strings.TrimSpace(resp.Choices[0].Message.Content), 64)
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse weight: %w", err)
 	}
 
 	return weight, nil
@@ -322,21 +261,28 @@ func (s *AIService) analyzeWithGemini(ctx context.Context, imageURL string, weig
 	}
 	logger.Debugf("Downloaded image data: %d bytes", len(imageData))
 
-	prompt := fmt.Sprintf(`Analyze this image for diabetes management. Weight: %.1f g (estimate if 0).
+	prompt := fmt.Sprintf(`Вы — точный ассистент по анализу продуктов питания для контроля диабета. Ваша основная задача — распознавать продукты на изображении, оценивать их вес, если он не указан, и рассчитывать общее количество углеводов.
 
-Look carefully at the image. If you see ANY edible food items (cooked dishes, raw ingredients, snacks, drinks with calories, etc.), analyze them.
+**Входные данные:** Изображение еды. Вес: %.1f г (если 0 - оцените самостоятельно).
 
-ONLY if the image contains absolutely NO food items (like empty plates, utensils only, non-food objects), return:
+**Процесс:**
+1. **Определите ВСЕ съедобные продукты.** Сюда входят приготовленные блюда, сырые ингредиенты, закуски и калорийные напитки.
+2. **Если еда отсутствует:** (например, пустые тарелки, только столовые приборы, объекты, не являющиеся едой), верните JSON-структуру "НЕТ ЕДЫ", указанную ниже.
+3. **Для каждого найденного продукта:**
+   * Оцените его индивидуальный вес в граммах, если общий вес равен 0 или требует уточнения.
+   * Рассчитайте содержание углеводов в граммах, включая крахмалы, сахара и углеводы из панировки, соусов или глазури.
+4. **Рассчитайте общее количество углеводов** для всех найденных продуктов.
+5. **Определите уровень достоверности:** "high" (высокий), если продукты четко видны и легко идентифицируются; "medium" (средний), если есть некоторые неясности; "low" (низкий), если идентификация очень сложна или частична.
+
+**Формат вывода (ТОЛЬКО JSON):**
+
+**A. Если еда не обнаружена:**
 {"food_items":[],"carbs":0,"confidence":"low","analysis_text":"На изображении не обнаружена еда. Пожалуйста, отправьте фото блюда для анализа.","weight":0}
 
-For ANY food items found:
-- List all food items
-- Calculate total carbohydrates in grams
-- Include starches, sugars, breading, sauces
-- Confidence: high/medium/low based on visibility
-- Analysis MUST be in Russian language only: "1. Название блюда: Xг, Yг углеводов"
+**B. Если еда найдена:**
+{"food_items":["продукт1","продукт2"],"carbs":X.X,"confidence":"high/medium/low","analysis_text":"ПОДРОБНЫЙ АНАЛИЗ НА РУССКОМ: 1. Название блюда: Xг, Yг углеводов","weight":X.X}
 
-Return JSON: {"food_items":["item1","item2"],"carbs":X.X,"confidence":"level","analysis_text":"RUSSIAN TEXT ONLY","weight":X.X}`, weight)
+Анализируйте внимательно и возвращайте точный JSON.`, weight)
 
 	var result FoodAnalysisResult
 	logger.Debug("Sending request to Gemini API")
@@ -402,75 +348,6 @@ Return JSON: {"food_items":["item1","item2"],"carbs":X.X,"confidence":"level","a
 		return nil, fmt.Errorf("failed to analyze with retries: %w", err)
 	}
 
-	return &result, nil
-}
-
-func (s *AIService) analyzeWithOpenAI(ctx context.Context, imageURL string, weight float64) (*FoodAnalysisResult, error) {
-	logger.Debugf("Starting OpenAI analysis for image: %s", imageURL)
-
-	prompt := fmt.Sprintf(`Analyze this image for diabetes management. Weight: %.1f g (estimate if 0).
-
-Look carefully at the image. If you see ANY edible food items (cooked dishes, raw ingredients, snacks, drinks with calories, etc.), analyze them.
-
-ONLY if the image contains absolutely NO food items (like empty plates, utensils only, non-food objects), return:
-{"food_items":[],"carbs":0,"confidence":"low","analysis_text":"На изображении не обнаружена еда. Пожалуйста, отправьте фото блюда для анализа.","weight":0}
-
-For ANY food items found:
-- List all food items
-- Calculate total carbohydrates in grams
-- Include starches, sugars, breading, sauces
-- Confidence: high/medium/low based on visibility
-- Analysis MUST be in Russian language only: "1. Название блюда: Xг, Yг углеводов"
-
-Return JSON: {"food_items":["item1","item2"],"carbs":X.X,"confidence":"level","analysis_text":"RUSSIAN TEXT ONLY","weight":X.X}`, weight)
-
-	logger.Debug("Sending request to OpenAI API")
-	resp, err := s.openaiClient.CreateChatCompletion(
-		ctx,
-		openai.ChatCompletionRequest{
-			Model: openai.GPT4VisionPreview,
-			Messages: []openai.ChatCompletionMessage{
-				{
-					Role: openai.ChatMessageRoleUser,
-					MultiContent: []openai.ChatMessagePart{
-						{
-							Type: openai.ChatMessagePartTypeText,
-							Text: prompt,
-						},
-						{
-							Type: openai.ChatMessagePartTypeImageURL,
-							ImageURL: &openai.ChatMessageImageURL{
-								URL: imageURL,
-							},
-						},
-					},
-				},
-			},
-		},
-	)
-	if err != nil {
-		logger.Errorf("OpenAI API request failed: %v", err)
-		return nil, fmt.Errorf("failed to create chat completion: %w", err)
-	}
-
-	var result FoodAnalysisResult
-	responseText := resp.Choices[0].Message.Content
-	logger.Debugf("OpenAI raw response: %s", responseText)
-
-	// Extract JSON from the response, handling code blocks or text wrapping
-	jsonStr := extractJSON(responseText)
-	if jsonStr == "" {
-		logger.Error("No valid JSON found in OpenAI response")
-		return nil, fmt.Errorf("no valid JSON found in response")
-	}
-	logger.Debugf("Extracted JSON: %s", jsonStr)
-
-	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
-		logger.Errorf("Failed to parse JSON response: %v", err)
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	logger.Debug("OpenAI analysis completed successfully")
 	return &result, nil
 }
 
