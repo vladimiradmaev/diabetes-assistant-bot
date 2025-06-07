@@ -17,6 +17,7 @@ vendor/
 
 # Environment variables
 .env
+.env.logging
 
 # Log files
 logs/

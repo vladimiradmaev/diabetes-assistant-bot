@@ -29,6 +29,7 @@ services:
       - DB_NAME=diabetes_helper
     env_file:
       - .env
+      - .env.logging
     restart: unless-stopped
     volumes:
       - ./logs:/app/logs
