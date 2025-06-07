@@ -245,7 +245,7 @@ func isValidHostname(hostname string) bool {
 
 func isValidTelegramToken(token string) bool {
 	// Telegram bot token format: bot_id:auth_token
-	// Example: 123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw
+	// Example: 123456789:AAHdqwcvCH1vGWzxfSeofSAs0l5PALDsaw
 	if len(token) < 35 || len(token) > 50 {
 		return false
 	}

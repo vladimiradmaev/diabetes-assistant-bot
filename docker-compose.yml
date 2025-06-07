@@ -16,10 +16,26 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --appendfsync everysec
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
   app:
     build: .
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     environment:
       - DB_HOST=db
@@ -27,6 +43,8 @@ services:
       - DB_USER=postgres
       - DB_PASSWORD=postgres
       - DB_NAME=diabetes_helper
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
     env_file:
       - .env
       - .env.logging
@@ -35,4 +53,5 @@ services:
       - ./logs:/app/logs
 
 volumes:
-  postgres_data: 
+  postgres_data:
+  redis_data: 

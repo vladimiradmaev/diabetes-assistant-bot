@@ -69,8 +69,18 @@ func main() {
 	var insulinService interfaces.InsulinServiceInterface = services.NewInsulinService(db)
 	logger.Info("Services initialized successfully")
 
+	// Get Redis settings from environment
+	redisHost := os.Getenv("REDIS_HOST")
+	if redisHost == "" {
+		redisHost = "localhost"
+	}
+	redisPort := os.Getenv("REDIS_PORT")
+	if redisPort == "" {
+		redisPort = "6379"
+	}
+
 	// Initialize bot with interfaces
-	telegramBot, err := bot.NewBot(cfg.TelegramToken, userService, foodAnalysisService, bloodSugarService, insulinService)
+	telegramBot, err := bot.NewBot(cfg.TelegramToken, redisHost, redisPort, userService, foodAnalysisService, bloodSugarService, insulinService)
 	if err != nil {
 		logger.Error("Failed to create bot", "error", err)
 		os.Exit(1)

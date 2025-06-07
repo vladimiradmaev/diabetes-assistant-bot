@@ -17,11 +17,11 @@ import (
 type TextHandler struct {
 	api          *tgbotapi.BotAPI
 	deps         Dependencies
-	stateManager *state.Manager
+	stateManager state.StateManager
 }
 
 // NewTextHandler creates a new text handler
-func NewTextHandler(api *tgbotapi.BotAPI, deps Dependencies, stateManager *state.Manager) *TextHandler {
+func NewTextHandler(api *tgbotapi.BotAPI, deps Dependencies, stateManager state.StateManager) *TextHandler {
 	return &TextHandler{
 		api:          api,
 		deps:         deps,

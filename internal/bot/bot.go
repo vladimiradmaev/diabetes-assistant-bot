@@ -20,6 +20,7 @@ type Bot struct {
 // NewBot creates a new bot instance
 func NewBot(
 	token string,
+	redisHost, redisPort string,
 	userService interfaces.UserServiceInterface,
 	foodAnalysisSvc interfaces.FoodAnalysisServiceInterface,
 	bloodSugarSvc interfaces.BloodSugarServiceInterface,
@@ -40,8 +41,11 @@ func NewBot(
 		InsulinSvc:      insulinSvc,
 	}
 
-	// Create state manager
-	stateManager := state.NewManager()
+	// Create Redis state manager
+	stateManager, err := state.NewRedisManager(redisHost, redisPort)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Redis state manager: %w", err)
+	}
 
 	// Create update handler
 	updateHandler := handlers.NewUpdateHandler(api, userService, deps, stateManager)

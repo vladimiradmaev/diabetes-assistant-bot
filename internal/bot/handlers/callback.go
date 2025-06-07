@@ -14,11 +14,11 @@ import (
 type CallbackHandler struct {
 	api          *tgbotapi.BotAPI
 	deps         Dependencies
-	stateManager *state.Manager
+	stateManager state.StateManager
 }
 
 // NewCallbackHandler creates a new callback handler
-func NewCallbackHandler(api *tgbotapi.BotAPI, deps Dependencies, stateManager *state.Manager) *CallbackHandler {
+func NewCallbackHandler(api *tgbotapi.BotAPI, deps Dependencies, stateManager state.StateManager) *CallbackHandler {
 	return &CallbackHandler{
 		api:          api,
 		deps:         deps,

@@ -14,7 +14,7 @@ import (
 type UpdateHandler struct {
 	api             *tgbotapi.BotAPI
 	userService     interfaces.UserServiceInterface
-	stateManager    *state.Manager
+	stateManager    state.StateManager
 	callbackHandler *CallbackHandler
 	commandHandler  *CommandHandler
 	textHandler     *TextHandler
@@ -26,7 +26,7 @@ func NewUpdateHandler(
 	api *tgbotapi.BotAPI,
 	userService interfaces.UserServiceInterface,
 	deps Dependencies,
-	stateManager *state.Manager,
+	stateManager state.StateManager,
 ) *UpdateHandler {
 	return &UpdateHandler{
 		api:             api,

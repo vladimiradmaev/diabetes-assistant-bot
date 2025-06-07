@@ -16,11 +16,11 @@ import (
 type PhotoHandler struct {
 	api          *tgbotapi.BotAPI
 	deps         Dependencies
-	stateManager *state.Manager
+	stateManager state.StateManager
 }
 
 // NewPhotoHandler creates a new photo handler
-func NewPhotoHandler(api *tgbotapi.BotAPI, deps Dependencies, stateManager *state.Manager) *PhotoHandler {
+func NewPhotoHandler(api *tgbotapi.BotAPI, deps Dependencies, stateManager state.StateManager) *PhotoHandler {
 	return &PhotoHandler{
 		api:          api,
 		deps:         deps,

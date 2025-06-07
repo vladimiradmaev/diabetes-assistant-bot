@@ -13,11 +13,11 @@ import (
 // CommandHandler handles bot commands
 type CommandHandler struct {
 	api          *tgbotapi.BotAPI
-	stateManager *state.Manager
+	stateManager state.StateManager
 }
 
 // NewCommandHandler creates a new command handler
-func NewCommandHandler(api *tgbotapi.BotAPI, stateManager *state.Manager) *CommandHandler {
+func NewCommandHandler(api *tgbotapi.BotAPI, stateManager state.StateManager) *CommandHandler {
 	return &CommandHandler{
 		api:          api,
 		stateManager: stateManager,
