@@ -12,6 +12,7 @@ import (
 	"github.com/vladimiradmaev/diabetes-helper/internal/bot"
 	"github.com/vladimiradmaev/diabetes-helper/internal/config"
 	"github.com/vladimiradmaev/diabetes-helper/internal/database"
+	"github.com/vladimiradmaev/diabetes-helper/internal/interfaces"
 	"github.com/vladimiradmaev/diabetes-helper/internal/logger"
 	"github.com/vladimiradmaev/diabetes-helper/internal/services"
 )
@@ -60,13 +61,15 @@ func main() {
 
 	// Initialize AI service
 	aiService := services.NewAIService(cfg.GeminiAPIKey)
-	userService := services.NewUserService(db)
-	foodAnalysisService := services.NewFoodAnalysisService(aiService, db)
-	bloodSugarService := services.NewBloodSugarService(db)
-	insulinService := services.NewInsulinService(db)
+
+	// Initialize services implementing interfaces
+	var userService interfaces.UserServiceInterface = services.NewUserService(db)
+	var foodAnalysisService interfaces.FoodAnalysisServiceInterface = services.NewFoodAnalysisService(aiService, db)
+	var bloodSugarService interfaces.BloodSugarServiceInterface = services.NewBloodSugarService(db)
+	var insulinService interfaces.InsulinServiceInterface = services.NewInsulinService(db)
 	logger.Info("Services initialized successfully")
 
-	// Initialize bot
+	// Initialize bot with interfaces
 	telegramBot, err := bot.NewBot(cfg.TelegramToken, userService, foodAnalysisService, bloodSugarService, insulinService)
 	if err != nil {
 		logger.Error("Failed to create bot", "error", err)

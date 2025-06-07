@@ -10,8 +10,8 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/vladimiradmaev/diabetes-helper/internal/database"
+	"github.com/vladimiradmaev/diabetes-helper/internal/interfaces"
 	"github.com/vladimiradmaev/diabetes-helper/internal/logger"
-	"github.com/vladimiradmaev/diabetes-helper/internal/services"
 )
 
 const (
@@ -24,16 +24,16 @@ const (
 
 type Bot struct {
 	api             *tgbotapi.BotAPI
-	userService     *services.UserService
-	foodAnalysisSvc *services.FoodAnalysisService
-	bloodSugarSvc   *services.BloodSugarService
-	insulinSvc      *services.InsulinService
+	userService     interfaces.UserServiceInterface
+	foodAnalysisSvc interfaces.FoodAnalysisServiceInterface
+	bloodSugarSvc   interfaces.BloodSugarServiceInterface
+	insulinSvc      interfaces.InsulinServiceInterface
 	userStates      map[int64]string                 // Map to track user states
 	userWeights     map[int64]float64                // Map to store user-provided weights
 	tempData        map[int64]map[string]interface{} // Map to store temporary data for multi-step operations
 }
 
-func NewBot(token string, userService *services.UserService, foodAnalysisSvc *services.FoodAnalysisService, bloodSugarSvc *services.BloodSugarService, insulinSvc *services.InsulinService) (*Bot, error) {
+func NewBot(token string, userService interfaces.UserServiceInterface, foodAnalysisSvc interfaces.FoodAnalysisServiceInterface, bloodSugarSvc interfaces.BloodSugarServiceInterface, insulinSvc interfaces.InsulinServiceInterface) (*Bot, error) {
 	api, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create bot: %w", err)
