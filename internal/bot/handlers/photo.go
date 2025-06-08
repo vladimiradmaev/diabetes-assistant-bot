@@ -37,16 +37,24 @@ func (h *PhotoHandler) Handle(ctx context.Context, message *tgbotapi.Message, us
 		return fmt.Errorf("failed to get file: %w", err)
 	}
 
-	// Check if weight is provided in caption
+	// Check if weight is provided in caption or saved from state
 	weight := 0.0
-	if message.Caption != "" {
+
+	// First check for saved weight from the food analysis flow
+	savedWeight := h.stateManager.GetUserWeight(user.TelegramID)
+	if savedWeight > 0 {
+		weight = savedWeight
+		logger.Infof("User %d using saved weight: %.1f g", user.ID, weight)
+		// Clear saved weight after use
+		h.stateManager.SetUserWeight(user.TelegramID, 0)
+	} else if message.Caption != "" {
 		weight, err = strconv.ParseFloat(message.Caption, 64)
 		if err != nil {
 			msg := tgbotapi.NewMessage(message.Chat.ID, "Неверный формат веса. Пожалуйста, укажите вес в граммах (например: 100).")
 			_, err := h.api.Send(msg)
 			return err
 		}
-		logger.Infof("User %d provided weight: %.1f g", user.ID, weight)
+		logger.Infof("User %d provided weight in caption: %.1f g", user.ID, weight)
 	} else {
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Вес не указан. Я попробую оценить вес блюда автоматически.")
 		_, err := h.api.Send(msg)
@@ -76,14 +84,15 @@ func (h *PhotoHandler) Handle(ctx context.Context, message *tgbotapi.Message, us
 	deleteMsg := tgbotapi.NewDeleteMessage(message.Chat.ID, sentMsg.MessageID)
 	h.api.Send(deleteMsg)
 
-	// Check if no food was detected
-	if analysis.Carbs == 0 && analysis.Weight == 0 && len(analysis.AnalysisText) > 0 &&
+	// Check if no food was detected (independent of weight)
+	if analysis.Carbs == 0 && len(analysis.AnalysisText) > 0 &&
 		strings.Contains(analysis.AnalysisText, "не обнаружена еда") {
-		// Send a simple text message for non-food images
-		msg := tgbotapi.NewMessage(message.Chat.ID, analysis.AnalysisText)
+		// Send a simple text message for non-food images with proper navigation
+		msg := tgbotapi.NewMessage(message.Chat.ID, "На изображении не обнаружена еда. Пожалуйста, отправьте фото блюда для анализа.")
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("◀️ В главное меню", "main_menu"),
+				tgbotapi.NewInlineKeyboardButtonData("🏠 Главное меню", "main_menu"),
+				tgbotapi.NewInlineKeyboardButtonData("🔄 Новый анализ", "analyze_food"),
 			),
 		)
 		msg.ReplyMarkup = keyboard
@@ -173,7 +182,8 @@ func (h *PhotoHandler) Handle(ctx context.Context, message *tgbotapi.Message, us
 	// Add navigation buttons
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("◀️ В главное меню", "main_menu"),
+			tgbotapi.NewInlineKeyboardButtonData("🏠 Главное меню", "main_menu"),
+			tgbotapi.NewInlineKeyboardButtonData("🔄 Новый анализ", "analyze_food"),
 		),
 	)
 	photoMsg.ReplyMarkup = keyboard
