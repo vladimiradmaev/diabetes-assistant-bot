@@ -12,6 +12,7 @@ func MainMenu() tgbotapi.InlineKeyboardMarkup {
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("⚙️ Настройки", "settings"),
+			tgbotapi.NewInlineKeyboardButtonData("ℹ️ Помощь", "help"),
 		),
 	)
 }

@@ -15,11 +15,9 @@ type StateManager interface {
 
 // User states constants
 const (
-	None                        = "none"
-	WaitingForBloodSugar        = "waiting_for_blood_sugar"
-	WaitingForInsulinRatio      = "waiting_for_insulin_ratio"
-	WaitingForTimePeriod        = "waiting_for_time_period"
-	WaitingForActiveInsulinTime = "waiting_for_active_insulin_time"
+	None                   = "none"
+	WaitingForInsulinRatio = "waiting_for_insulin_ratio"
+	WaitingForTimePeriod   = "waiting_for_time_period"
 )
 
 // InMemoryManager manages user states and temporary data in memory

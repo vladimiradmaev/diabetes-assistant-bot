@@ -37,8 +37,6 @@ func (h *CallbackHandler) Handle(ctx context.Context, query *tgbotapi.CallbackQu
 	switch query.Data {
 	case "analyze_food":
 		return h.handleAnalyzeFood(query.Message.Chat.ID, user)
-	case "blood_sugar":
-		return h.handleBloodSugar(query.Message.Chat.ID, user)
 	case "settings":
 		return h.handleSettings(query.Message.Chat.ID)
 	case "insulin_ratio":
@@ -55,8 +53,10 @@ func (h *CallbackHandler) Handle(ctx context.Context, query *tgbotapi.CallbackQu
 		return h.handleDeleteInsulinRatio(query.Message.Chat.ID, user)
 	case "clear_ratios":
 		return h.handleClearRatios(query.Message.Chat.ID, user)
-	case "active_insulin_time":
-		return h.handleActiveInsulinTime(query.Message.Chat.ID, user)
+	case "help":
+		return h.handleHelp(query.Message.Chat.ID)
+	case "food_examples":
+		return h.handleFoodExamples(query.Message.Chat.ID)
 	default:
 		return h.handleUnknownCallback(query.Message.Chat.ID)
 	}
@@ -66,27 +66,29 @@ func (h *CallbackHandler) Handle(ctx context.Context, query *tgbotapi.CallbackQu
 func (h *CallbackHandler) handleAnalyzeFood(chatID int64, user *database.User) error {
 	h.stateManager.SetUserState(user.TelegramID, "analyzing_food")
 
+	text := `📷 *Отправьте фото еды для анализа*
+
+💡 *Для точного расчета:*
+• Укажите вес в подписи к фото (например: "150")
+• Сфотографируйте блюдо целиком
+• Убедитесь, что освещение хорошее
+
+🤖 *Бот определит:*
+• Количество углеводов
+• Хлебные единицы (ХЕ)
+• Рекомендуемую дозу инсулина`
+
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("💡 Примеры", "food_examples"),
+			tgbotapi.NewInlineKeyboardButtonData("❓ Помощь", "help"),
+		),
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("◀️ Главное меню", "main_menu"),
 		),
 	)
-	msg := tgbotapi.NewMessage(chatID, "Отправьте фото еды для анализа. Вы также можете указать вес блюда в граммах в подписи к фото.")
-	msg.ReplyMarkup = keyboard
-	_, err := h.api.Send(msg)
-	return err
-}
-
-// handleBloodSugar handles blood sugar callback
-func (h *CallbackHandler) handleBloodSugar(chatID int64, user *database.User) error {
-	h.stateManager.SetUserState(user.TelegramID, state.WaitingForBloodSugar)
-
-	keyboard := tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("◀️ Главное меню", "main_menu"),
-		),
-	)
-	msg := tgbotapi.NewMessage(chatID, "Введите уровень сахара в крови (ммоль/л):")
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ParseMode = "Markdown"
 	msg.ReplyMarkup = keyboard
 	_, err := h.api.Send(msg)
 	return err
@@ -264,34 +266,74 @@ func (h *CallbackHandler) handleClearRatios(chatID int64, user *database.User) e
 	return menus.SendInsulinRatioMenu(h.api, chatID, ratios)
 }
 
-// handleActiveInsulinTime handles active insulin time callback
-func (h *CallbackHandler) handleActiveInsulinTime(chatID int64, user *database.User) error {
-	// Get current active insulin time
-	activeTime, err := h.deps.InsulinSvc.GetActiveInsulinTime(context.Background(), user.ID)
-	if err != nil {
-		msg := tgbotapi.NewMessage(chatID, "Ошибка при получении времени активного инсулина")
-		_, err := h.api.Send(msg)
-		return err
-	}
+// handleHelp handles help callback
+func (h *CallbackHandler) handleHelp(chatID int64) error {
+	text := `🤖 *Справка по использованию бота*
 
-	var text string
-	if activeTime == 0 {
-		text = "Время активного инсулина не установлено.\n\n"
-	} else {
-		hours := int(activeTime) / 60
-		minutes := int(activeTime) % 60
-		text = fmt.Sprintf("Текущее время активного инсулина: %d:%02d\n\n", hours, minutes)
-	}
-	text += "Введите время активного инсулина в формате ЧЧ:ММ (например, 1:30 для 1 часа и 30 минут):"
+*🍽️ Анализ еды:*
+• Отправьте фото блюда
+• В подписи можете указать вес в граммах (например: "150")
+• Если вес не указан, ИИ попробует определить его самостоятельно, но результат может быть менее точным
+• Получите информацию об углеводах, ХЕ и дозе инсулина
+
+*⚙️ Настройки:*
+• Установите коэффициенты инсулина на ХЕ для разного времени суток
+• Это повысит точность расчета дозы инсулина
+
+*💡 Советы:*
+• Указывайте точный вес блюда для наиболее точного расчета
+• Настройте коэффициенты для персонализированных рекомендаций
+• Всегда консультируйтесь с врачом!`
 
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("◀️ Назад", "settings"),
+			tgbotapi.NewInlineKeyboardButtonData("◀️ Главное меню", "main_menu"),
 		),
 	)
 	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ParseMode = "Markdown"
 	msg.ReplyMarkup = keyboard
-	_, err = h.api.Send(msg)
+	_, err := h.api.Send(msg)
+	return err
+}
+
+// handleFoodExamples handles food examples callback
+func (h *CallbackHandler) handleFoodExamples(chatID int64) error {
+	text := `📸 *Примеры фотографий еды:*
+
+✅ *Хорошие фото:*
+• Целое блюдо на тарелке
+• Хорошее освещение
+• Видны все компоненты
+• Указан вес: "200"
+
+❌ *Плохие фото:*
+• Слишком темно
+• Частично съеденное блюдо
+• Слишком далеко/близко
+• Неясные компоненты
+
+🥘 *Хорошо распознается:*
+• Каши, гарниры
+• Мясо, рыба
+• Овощи, салаты
+• Супы
+• Хлеб, выпечка
+
+⚠️ *Сложно распознается:*
+• Смешанные блюда
+• Соусы внутри
+• Мелко нарезанное`
+
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("◀️ Назад", "analyze_food"),
+		),
+	)
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ParseMode = "Markdown"
+	msg.ReplyMarkup = keyboard
+	_, err := h.api.Send(msg)
 	return err
 }
 

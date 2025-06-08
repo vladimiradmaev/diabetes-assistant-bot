@@ -34,42 +34,13 @@ func (h *TextHandler) Handle(ctx context.Context, message *tgbotapi.Message, use
 	userState := h.stateManager.GetUserState(user.TelegramID)
 
 	switch userState {
-	case state.WaitingForBloodSugar:
-		return h.handleBloodSugar(ctx, message, user)
 	case state.WaitingForTimePeriod:
 		return h.handleTimePeriod(ctx, message, user)
 	case state.WaitingForInsulinRatio:
 		return h.handleInsulinRatio(ctx, message, user)
-	case state.WaitingForActiveInsulinTime:
-		return h.handleActiveInsulinTime(ctx, message, user)
 	default:
 		return h.handleDefaultText(message.Chat.ID)
 	}
-}
-
-// handleBloodSugar handles blood sugar input
-func (h *TextHandler) handleBloodSugar(ctx context.Context, message *tgbotapi.Message, user *database.User) error {
-	value, err := strconv.ParseFloat(message.Text, 64)
-	if err != nil {
-		msg := tgbotapi.NewMessage(message.Chat.ID, "Пожалуйста, введите корректное число (например: 5.6)")
-		_, err := h.api.Send(msg)
-		return err
-	}
-
-	if err := h.deps.BloodSugarSvc.AddRecord(ctx, user.ID, value); err != nil {
-		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при сохранении данных. Пожалуйста, попробуйте еще раз.")
-		_, err := h.api.Send(msg)
-		return err
-	}
-
-	msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("✅ Уровень сахара %.1f ммоль/л успешно сохранен", value))
-	_, err = h.api.Send(msg)
-	if err != nil {
-		return err
-	}
-
-	h.stateManager.SetUserState(user.TelegramID, state.None)
-	return menus.SendMainMenu(h.api, message.Chat.ID)
 }
 
 // handleTimePeriod handles time period input for insulin ratios
@@ -195,53 +166,6 @@ func (h *TextHandler) handleInsulinRatio(ctx context.Context, message *tgbotapi.
 		return err
 	}
 	return menus.SendInsulinRatioMenu(h.api, message.Chat.ID, ratios)
-}
-
-// handleActiveInsulinTime handles active insulin time input
-func (h *TextHandler) handleActiveInsulinTime(ctx context.Context, message *tgbotapi.Message, user *database.User) error {
-	// Parse time format
-	parts := strings.Split(message.Text, ":")
-	if len(parts) != 2 {
-		msg := tgbotapi.NewMessage(message.Chat.ID, "Неверный формат. Введите время в формате ЧЧ:ММ (например, 1:30)")
-		_, err := h.api.Send(msg)
-		return err
-	}
-
-	hours, err := strconv.Atoi(parts[0])
-	if err != nil || hours < 0 || hours > 24 {
-		msg := tgbotapi.NewMessage(message.Chat.ID, "Часы должны быть числом от 0 до 24")
-		_, err := h.api.Send(msg)
-		return err
-	}
-
-	minutes, err := strconv.Atoi(parts[1])
-	if err != nil || minutes < 0 || minutes > 59 {
-		msg := tgbotapi.NewMessage(message.Chat.ID, "Минуты должны быть числом от 0 до 59")
-		_, err := h.api.Send(msg)
-		return err
-	}
-
-	totalMinutes := hours*60 + minutes
-	if totalMinutes == 0 {
-		msg := tgbotapi.NewMessage(message.Chat.ID, "Время активного инсулина не может быть равно нулю")
-		_, err := h.api.Send(msg)
-		return err
-	}
-
-	if err := h.deps.InsulinSvc.SetActiveInsulinTime(ctx, user.ID, totalMinutes); err != nil {
-		msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("Ошибка при сохранении времени: %v", err))
-		_, err := h.api.Send(msg)
-		return err
-	}
-
-	msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("✅ Время активного инсулина установлено: %d:%02d", hours, minutes))
-	_, err = h.api.Send(msg)
-	if err != nil {
-		return err
-	}
-
-	h.stateManager.SetUserState(user.TelegramID, state.None)
-	return menus.SendSettingsMenu(h.api, message.Chat.ID)
 }
 
 // handleDefaultText handles text when no specific state is set
