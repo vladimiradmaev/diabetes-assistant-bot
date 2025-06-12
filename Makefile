@@ -109,8 +109,7 @@ local-run: local-db ## Запустить приложение локально 
 	@echo "$(GREEN)Ожидание готовности базы данных...$(NC)"
 	@until $(DOCKER_COMPOSE_CMD) exec db pg_isready -U postgres; do sleep 1; done
 	@echo "$(GREEN)База данных готова. Запуск приложения...$(NC)"
-	go run main.go
-
+	go run main.go 
 # Команды для валидации
 validate-config: ## Проверить валидность конфигурации
 	@echo "$(GREEN)Проверка конфигурации...$(NC)"
