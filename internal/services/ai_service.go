@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/generative-ai-go/genai"
+	apperrors "github.com/vladimiradmaev/diabetes-helper/internal/errors"
 	"github.com/vladimiradmaev/diabetes-helper/internal/logger"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
@@ -18,6 +20,7 @@ import (
 
 type AIService struct {
 	geminiClient *genai.Client
+	logger       *slog.Logger
 }
 
 type FoodAnalysisResult struct {
@@ -29,24 +32,24 @@ type FoodAnalysisResult struct {
 }
 
 func NewAIService(geminiAPIKey string) *AIService {
-	service := &AIService{}
+	service := &AIService{
+		logger: logger.GetLogger(),
+	}
 
 	// Initialize Gemini client
 	if geminiAPIKey != "" {
-		logger.Infof("Initializing Gemini client with API key (length: %d)", len(geminiAPIKey))
+		service.logger.Info("Initializing Gemini client", "api_key_length", len(geminiAPIKey))
 		ctx := context.Background()
 		client, err := genai.NewClient(ctx, option.WithAPIKey(geminiAPIKey))
 		if err != nil {
-			logger.Errorf("Failed to initialize Gemini client: %v", err)
+			service.logger.Error("Failed to initialize Gemini client", "error", err)
 		} else {
 			service.geminiClient = client
-			logger.Info("Gemini client initialized successfully")
-
-			// Test model availability
-			logger.Infof("Testing Gemini model availability: %s", "gemini-2.0-flash")
+			service.logger.Info("Gemini client initialized successfully")
+			service.logger.Info("Testing Gemini model", "model", "gemini-2.0-flash")
 		}
 	} else {
-		logger.Error("Gemini API key not provided")
+		service.logger.Error("Gemini API key not provided")
 	}
 
 	return service
@@ -96,33 +99,51 @@ func retryWithBackoff(ctx context.Context, maxRetries int, fn func() error) erro
 }
 
 func (s *AIService) AnalyzeFoodImage(ctx context.Context, imageURL string, weight float64) (*FoodAnalysisResult, error) {
-	logger.Infof("Starting food image analysis, imageURL: %s, weight: %.1f g", imageURL, weight)
+	s.logger.InfoContext(ctx, "Starting food image analysis",
+		"image_url", imageURL,
+		"weight", weight)
 
 	if s.geminiClient == nil {
-		return nil, fmt.Errorf("Gemini client not available")
+		return nil, apperrors.NewExternalAPIError(
+			fmt.Errorf("Gemini client not available"),
+			"Gemini").WithContext("operation", "analyze_food_image")
 	}
 
 	var estimatedWeight float64
 	var err error
 
 	if weight <= 0 {
-		logger.Info("No weight provided, estimating weight from image")
+		s.logger.InfoContext(ctx, "No weight provided, estimating weight from image")
 		// If no weight provided, estimate it first
 		estimatedWeight, err = s.estimateWeight(ctx, imageURL)
 		if err != nil {
-			logger.Warningf("Failed to estimate weight: %v", err)
+			// Проверяем, не обнаружена ли еда
+			if strings.Contains(err.Error(), "NO_FOOD_DETECTED") {
+				s.logger.InfoContext(ctx, "No food detected in image during weight estimation")
+				// Возвращаем стандартный ответ для отсутствия еды
+				return &FoodAnalysisResult{
+					FoodItems:    []string{},
+					Carbs:        0,
+					Confidence:   "low",
+					AnalysisText: "На изображении не обнаружена еда. Пожалуйста, отправьте фото блюда для анализа.",
+					Weight:       0,
+				}, nil
+			}
+			s.logger.WarnContext(ctx, "Failed to estimate weight", "error", err)
 			// Не возвращаем ошибку, а продолжаем анализ без веса
-			logger.Info("Continuing analysis without weight estimation")
+			s.logger.InfoContext(ctx, "Continuing analysis without weight estimation")
 		} else {
 			weight = estimatedWeight
-			logger.Infof("Estimated weight: %.1f g", weight)
+			s.logger.InfoContext(ctx, "Estimated weight", "weight", weight)
 		}
 	}
 
 	result, err := s.analyzeWithGemini(ctx, imageURL, weight)
 	if err != nil {
-		logger.Errorf("Food analysis failed: %v", err)
-		return nil, err
+		return nil, apperrors.NewExternalAPIError(err, "Gemini").
+			WithContext("operation", "analyze_with_gemini").
+			WithContext("image_url", imageURL).
+			WithContext("weight", weight)
 	}
 
 	// Ensure the weight is set in the result
@@ -130,7 +151,10 @@ func (s *AIService) AnalyzeFoodImage(ctx context.Context, imageURL string, weigh
 		result.Weight = weight
 	}
 
-	logger.Infof("Food analysis completed successfully: %+v", result)
+	s.logger.InfoContext(ctx, "Food analysis completed successfully",
+		"carbs", result.Carbs,
+		"confidence", result.Confidence,
+		"food_items_count", len(result.FoodItems))
 	return result, nil
 }
 
@@ -181,7 +205,9 @@ func (s *AIService) estimateWeightWithGemini(ctx context.Context, imageURL strin
 3. Плотность продуктов (мясо тяжелее овощей)
 4. Количество компонентов
 
-Верни ТОЛЬКО число в граммах (например: 180)`
+ВАЖНО: Если на изображении НЕТ ЕДЫ (только тарелки, приборы, или другие объекты), верни ТОЧНО: NO_FOOD
+
+Верни ТОЛЬКО число в граммах (например: 180) или NO_FOOD`
 
 	var weight float64
 	err = retryWithBackoff(ctx, 3, func() error {
@@ -217,6 +243,11 @@ func (s *AIService) estimateWeightWithGemini(ctx context.Context, imageURL strin
 		responseText := geminiResp.Candidates[0].Content.Parts[0].(genai.Text)
 		responseStr := strings.TrimSpace(string(responseText))
 
+		// Проверяем, есть ли на изображении еда
+		if responseStr == "NO_FOOD" {
+			return fmt.Errorf("NO_FOOD_DETECTED")
+		}
+
 		// Проверяем, содержит ли ответ только число
 		if strings.Contains(strings.ToLower(responseStr), "невозможно") ||
 			strings.Contains(strings.ToLower(responseStr), "нет еды") ||
@@ -242,24 +273,25 @@ func (s *AIService) estimateWeightWithGemini(ctx context.Context, imageURL strin
 }
 
 func (s *AIService) analyzeWithGemini(ctx context.Context, imageURL string, weight float64) (*FoodAnalysisResult, error) {
-	logger.Debugf("Starting Gemini analysis for image: %s", imageURL)
+	s.logger.DebugContext(ctx, "Starting Gemini analysis", "image_url", imageURL, "weight", weight)
 	model := s.geminiClient.GenerativeModel("gemini-2.0-flash")
 
 	// Download image
-	logger.Debug("Downloading image from URL")
+	s.logger.DebugContext(ctx, "Downloading image from URL")
 	resp, err := http.Get(imageURL)
 	if err != nil {
-		logger.Errorf("Failed to download image from %s: %v", imageURL, err)
-		return nil, fmt.Errorf("failed to download image: %w", err)
+		return nil, apperrors.NewExternalAPIError(err, "HTTP").
+			WithContext("image_url", imageURL).
+			WithContext("operation", "download_image")
 	}
 	defer resp.Body.Close()
 
 	imageData, err := io.ReadAll(resp.Body)
 	if err != nil {
-		logger.Errorf("Failed to read image data: %v", err)
-		return nil, fmt.Errorf("failed to read image data: %w", err)
+		return nil, apperrors.NewInternalError(err).
+			WithContext("operation", "read_image_data")
 	}
-	logger.Debugf("Downloaded image data: %d bytes", len(imageData))
+	s.logger.DebugContext(ctx, "Downloaded image data", "bytes", len(imageData))
 
 	prompt := fmt.Sprintf(`Вы — точный ассистент по анализу продуктов питания для контроля диабета. Ваша основная задача — распознавать продукты на изображении, оценивать их вес, если он не указан, и рассчитывать общее количество углеводов.
 
@@ -274,6 +306,8 @@ func (s *AIService) analyzeWithGemini(ctx context.Context, imageURL string, weig
 4. **Рассчитайте общее количество углеводов** для всех найденных продуктов.
 5. **Определите уровень достоверности:** "high" (высокий), если продукты четко видны и легко идентифицируются; "medium" (средний), если есть некоторые неясности; "low" (низкий), если идентификация очень сложна или частична.
 
+**КРИТИЧЕСКИ ВАЖНО: Отвечайте ТОЛЬКО валидным JSON объектом! Никакого дополнительного текста!**
+
 **Формат вывода (ТОЛЬКО JSON):**
 
 **A. Если еда не обнаружена:**
@@ -282,7 +316,7 @@ func (s *AIService) analyzeWithGemini(ctx context.Context, imageURL string, weig
 **B. Если еда найдена:**
 {"food_items":["продукт1","продукт2"],"carbs":X.X,"confidence":"high/medium/low","analysis_text":"ПОДРОБНЫЙ АНАЛИЗ НА РУССКОМ: 1. Название блюда: Xг, Yг углеводов","weight":X.X}
 
-Анализируйте внимательно и возвращайте точный JSON.`, weight)
+Начинайте ответ с { и заканчивайте }. Возвращайте ТОЛЬКО JSON!`, weight)
 
 	var result FoodAnalysisResult
 	logger.Debug("Sending request to Gemini API")
@@ -298,7 +332,7 @@ func (s *AIService) analyzeWithGemini(ctx context.Context, imageURL string, weig
 				imageFormat = "image/jpeg"
 			}
 		}
-		logger.Debugf("Detected image format: %s", imageFormat)
+		s.logger.DebugContext(ctx, "Detected image format", "format", imageFormat)
 
 		img := genai.ImageData(imageFormat, imageData)
 		geminiResp, err := model.GenerateContent(ctx, img, genai.Text(prompt))
@@ -326,7 +360,7 @@ func (s *AIService) analyzeWithGemini(ctx context.Context, imageURL string, weig
 		}
 
 		responseText := geminiResp.Candidates[0].Content.Parts[0].(genai.Text)
-		logger.Debugf("Gemini raw response: %s", string(responseText))
+		s.logger.DebugContext(ctx, "Gemini raw response", "response", string(responseText))
 
 		// Extract JSON from the response, handling code blocks or text wrapping
 		jsonStr := extractJSON(string(responseText))
@@ -334,7 +368,7 @@ func (s *AIService) analyzeWithGemini(ctx context.Context, imageURL string, weig
 			logger.Error("No valid JSON found in Gemini response")
 			return fmt.Errorf("no valid JSON found in response")
 		}
-		logger.Debugf("Extracted JSON: %s", jsonStr)
+		s.logger.DebugContext(ctx, "Extracted JSON", "json", jsonStr)
 
 		if parseErr := json.Unmarshal([]byte(jsonStr), &result); parseErr != nil {
 			logger.Errorf("Failed to parse JSON response: %v", parseErr)
@@ -344,6 +378,18 @@ func (s *AIService) analyzeWithGemini(ctx context.Context, imageURL string, weig
 	})
 
 	if err != nil {
+		// Check if it's a JSON parsing error - treat as no food detected
+		if strings.Contains(err.Error(), "no valid JSON found") || strings.Contains(err.Error(), "failed to parse response") {
+			s.logger.InfoContext(ctx, "No valid JSON found, treating as no food detected")
+			return &FoodAnalysisResult{
+				FoodItems:    []string{},
+				Carbs:        0,
+				Confidence:   "low",
+				AnalysisText: "На изображении не обнаружена еда. Пожалуйста, отправьте фото блюда для анализа.",
+				Weight:       weight,
+			}, nil
+		}
+
 		logger.Errorf("Gemini analysis failed after retries: %v", err)
 		return nil, fmt.Errorf("failed to analyze with retries: %w", err)
 	}
@@ -356,6 +402,16 @@ func extractJSON(s string) string {
 	s = strings.ReplaceAll(s, "```json", "")
 	s = strings.ReplaceAll(s, "```", "")
 	s = strings.TrimSpace(s)
+
+	// If response mentions no food without JSON, return fallback
+	lowerS := strings.ToLower(s)
+	if (strings.Contains(lowerS, "нет еды") ||
+		strings.Contains(lowerS, "не обнаружена еда") ||
+		strings.Contains(lowerS, "отсутствует") ||
+		strings.Contains(lowerS, "no food") ||
+		strings.Contains(lowerS, "не видно еды")) && !strings.Contains(s, "{") {
+		return `{"food_items":[],"carbs":0,"confidence":"low","analysis_text":"На изображении не обнаружена еда. Пожалуйста, отправьте фото блюда для анализа.","weight":0}`
+	}
 
 	// Find JSON object boundaries
 	start := strings.Index(s, "{")
