@@ -2,40 +2,44 @@ package domain
 
 import (
 	"time"
-
-	"gorm.io/gorm"
 )
 
 // User represents a telegram user in the system
 type User struct {
-	gorm.Model
-	TelegramID        int64 `gorm:"uniqueIndex"`
+	ID                uint
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	DeletedAt         *time.Time
+	TelegramID        int64
 	Username          string
 	FirstName         string
 	LastName          string
-	ActiveInsulinTime int `gorm:"default:0"` // Time in minutes
+	ActiveInsulinTime int // Time in minutes
 }
 
 // FoodAnalysis represents a food analysis result
 type FoodAnalysis struct {
-	ID           uint `gorm:"primaryKey"`
-	UserID       uint `gorm:"index"`
+	ID           uint
+	UserID       uint
 	ImageURL     string
 	Weight       float64
 	Carbs        float64
-	BreadUnits   float64 `gorm:"column:bread_units"`
+	BreadUnits   float64
 	Confidence   float64
 	AnalysisText string
 	UsedProvider string
-	InsulinUnits float64 `gorm:"column:insulin_units"`
-	InsulinRatio float64 `gorm:"column:insulin_ratio"`
+	InsulinUnits float64
+	InsulinRatio float64
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
 
 // BloodSugarRecord represents a blood sugar measurement
 type BloodSugarRecord struct {
-	gorm.Model
+	ID        uint
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DeletedAt *time.Time
 	UserID    uint
 	User      User
 	Value     float64
@@ -44,7 +48,10 @@ type BloodSugarRecord struct {
 
 // InsulinRatio represents insulin ratio for a specific time period
 type InsulinRatio struct {
-	gorm.Model
+	ID        uint
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DeletedAt *time.Time
 	UserID    uint
 	User      User
 	StartTime string  // Format: "HH:MM"

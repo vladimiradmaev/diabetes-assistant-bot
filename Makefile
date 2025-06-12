@@ -109,12 +109,35 @@ local-run: local-db ## Запустить приложение локально 
 	@echo "$(GREEN)Ожидание готовности базы данных...$(NC)"
 	@until $(DOCKER_COMPOSE_CMD) exec db pg_isready -U postgres; do sleep 1; done
 	@echo "$(GREEN)База данных готова. Запуск приложения...$(NC)"
-	go run main.go
-
+	go run main.go 
 # Команды для валидации
 validate-config: ## Проверить валидность конфигурации
 	@echo "$(GREEN)Проверка конфигурации...$(NC)"
-	go run cmd/validate-config/main.go
+	@if command -v go >/dev/null 2>&1; then \
+		go run cmd/validate-config/main.go; \
+	else \
+		echo "$(YELLOW)Go не найден, используем Docker...$(NC)"; \
+		$(MAKE) validate-config-docker; \
+	fi
+
+validate-config-docker: check-docker ## Проверить конфигурацию через Docker
+	@echo "$(GREEN)Проверка конфигурации через Docker...$(NC)"
+	docker run --rm \
+		-v $(PWD):/app \
+		-w /app \
+		-e TELEGRAM_BOT_TOKEN \
+		-e GEMINI_API_KEY \
+		-e DB_HOST \
+		-e DB_PORT \
+		-e DB_USER \
+		-e DB_PASSWORD \
+		-e DB_NAME \
+		-e LOG_LEVEL \
+		-e LOG_OUTPUT \
+		-e LOG_FORMAT \
+		--env-file .env \
+		golang:1.21-alpine \
+		sh -c "go mod download && go run cmd/validate-config/main.go"
 
 test-config: ## Протестировать валидацию с разными параметрами
 	@echo "$(GREEN)Тестирование валидации конфигурации...$(NC)"
