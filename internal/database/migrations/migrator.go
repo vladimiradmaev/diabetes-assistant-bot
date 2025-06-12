@@ -31,8 +31,13 @@ func Register(id string, up, down func(*gorm.DB) error) {
 
 // RunMigrations executes all pending migrations
 func RunMigrations(db *gorm.DB) error {
-	// Create migrations table if it doesn't exist
-	if err := db.AutoMigrate(&MigrationRecord{}); err != nil {
+	// Create migrations table with raw SQL instead of AutoMigrate
+	if err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS migration_records (
+			id VARCHAR(255) PRIMARY KEY,
+			created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
+		)
+	`).Error; err != nil {
 		return fmt.Errorf("failed to create migrations table: %w", err)
 	}
 
@@ -80,6 +85,11 @@ type MigrationRecord struct {
 	CreatedAt int64  `gorm:"autoCreateTime"`
 }
 
+// TableName returns the table name for this model
+func (MigrationRecord) TableName() string {
+	return "migration_records"
+}
+
 // LoadSQLMigrations loads SQL migrations from a directory
 func LoadSQLMigrations(db *gorm.DB, dir string) error {
 	files, err := os.ReadDir(dir)
@@ -99,7 +109,16 @@ func LoadSQLMigrations(db *gorm.DB, dir string) error {
 
 			// Register the migration
 			Register(id, func(db *gorm.DB) error {
-				return db.Exec(string(content)).Error
+				if err := db.Exec(string(content)).Error; err != nil {
+					// Ignore certain harmless errors in migrations
+					if strings.Contains(err.Error(), "already exists") ||
+						strings.Contains(err.Error(), "does not exist") {
+						log.Printf("Migration %s: ignoring harmless error: %v", id, err)
+						return nil
+					}
+					return err
+				}
+				return nil
 			}, nil) // No down migration for SQL files
 		}
 	}

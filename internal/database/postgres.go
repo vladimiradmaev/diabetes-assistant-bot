@@ -14,16 +14,22 @@ import (
 )
 
 type User struct {
-	gorm.Model
-	TelegramID        int64 `gorm:"uniqueIndex"`
+	ID                uint
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	DeletedAt         *time.Time
+	TelegramID        int64
 	Username          string
 	FirstName         string
 	LastName          string
-	ActiveInsulinTime int `gorm:"default:0"` // Time in minutes
+	ActiveInsulinTime int // Time in minutes
 }
 
 type FoodAnalysis struct {
-	gorm.Model
+	ID           uint
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	DeletedAt    *time.Time
 	UserID       uint
 	User         User
 	ImageURL     string
@@ -38,7 +44,10 @@ type FoodAnalysis struct {
 }
 
 type FoodAnalysisCorrection struct {
-	gorm.Model
+	ID              uint
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	DeletedAt       *time.Time
 	UserID          uint
 	User            User
 	OriginalCarbs   float64
@@ -53,7 +62,10 @@ type FoodAnalysisCorrection struct {
 }
 
 type BloodSugarRecord struct {
-	gorm.Model
+	ID        uint
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DeletedAt *time.Time
 	UserID    uint
 	User      User
 	Value     float64
@@ -61,7 +73,10 @@ type BloodSugarRecord struct {
 }
 
 type InsulinRatio struct {
-	gorm.Model
+	ID        uint
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DeletedAt *time.Time
 	UserID    uint
 	User      User
 	StartTime string  // Format: "HH:MM"
@@ -73,7 +88,15 @@ func NewPostgresDB(cfg config.DBConfig) (*gorm.DB, error) {
 	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 		cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.DBName)
 
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+		DisableForeignKeyConstraintWhenMigrating: true,
+		DisableAutomaticPing:                     true,
+		SkipDefaultTransaction:                   false,
+		PrepareStmt:                              false,
+		CreateBatchSize:                          0,
+		FullSaveAssociations:                     false,
+		AllowGlobalUpdate:                        false,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
@@ -94,10 +117,7 @@ func NewPostgresDB(cfg config.DBConfig) (*gorm.DB, error) {
 		return nil, fmt.Errorf("failed to run migrations: %w", err)
 	}
 
-	// Auto-migrate the schema for models that don't have explicit migrations
-	if err := db.AutoMigrate(&User{}, &FoodAnalysis{}, &FoodAnalysisCorrection{}, &BloodSugarRecord{}, &InsulinRatio{}); err != nil {
-		return nil, fmt.Errorf("failed to auto-migrate database: %w", err)
-	}
+	// Auto-migrate is disabled because we use SQL migrations
 
 	log.Println("Database connection established and migrations completed")
 	return db, nil
